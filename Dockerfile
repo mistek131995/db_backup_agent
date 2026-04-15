@@ -7,6 +7,7 @@ COPY DbBackupAgent/DbBackupAgent.csproj ./DbBackupAgent/
 RUN dotnet restore ./DbBackupAgent/DbBackupAgent.csproj
 
 COPY DbBackupAgent/ ./DbBackupAgent/
+COPY DbBackupAgent/appsettings.json ./
 RUN dotnet publish ./DbBackupAgent/DbBackupAgent.csproj \
       -c Release \
       -o /app/publish \
