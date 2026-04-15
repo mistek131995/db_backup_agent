@@ -44,11 +44,14 @@ public sealed class BackupWorker : BackgroundService
         return true;
     }
 
+    /// <summary>How often the worker checks whether a cron occurrence is due.</summary>
+    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(30);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "BackupWorker started. Databases: {Count}, poll interval: {PollMinutes} min",
-            _databases.Count, ScheduleService.PollInterval.TotalMinutes);
+            "BackupWorker started. Databases: {Count}, tick: {TickSec}s, schedule poll: {PollMin} min",
+            _databases.Count, TickInterval.TotalSeconds, ScheduleService.PollInterval.TotalMinutes);
 
         DateTime? lastRun = null;
 
@@ -60,7 +63,7 @@ public sealed class BackupWorker : BackgroundService
 
                 if (nextRun is null)
                 {
-                    _logger.LogInformation("BackupWorker: schedule is inactive, skipping backup run");
+                    _logger.LogDebug("BackupWorker: schedule is inactive, skipping");
                 }
                 else if (nextRun.Value <= DateTime.UtcNow && (lastRun is null || nextRun > lastRun))
                 {
@@ -90,7 +93,7 @@ public sealed class BackupWorker : BackgroundService
 
             try
             {
-                await Task.Delay(ScheduleService.PollInterval, stoppingToken);
+                await Task.Delay(TickInterval, stoppingToken);
             }
             catch (OperationCanceledException)
             {
