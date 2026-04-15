@@ -10,18 +10,27 @@ public sealed class EncryptionService
     private readonly byte[] _key;
     private readonly ILogger<EncryptionService> _logger;
 
+    public bool IsConfigured { get; }
+
     public EncryptionService(IOptions<EncryptionSettings> settings, ILogger<EncryptionService> logger)
     {
         _logger = logger;
 
         var keyBase64 = settings.Value.Key;
         if (string.IsNullOrWhiteSpace(keyBase64))
-            throw new InvalidOperationException("EncryptionSettings:Key is required");
+        {
+            _logger.LogWarning("EncryptionSettings:Key is not set. Agent will not run backups until the key is configured.");
+            _key = [];
+            IsConfigured = false;
+            return;
+        }
 
         _key = Convert.FromBase64String(keyBase64);
         if (_key.Length != 32)
             throw new InvalidOperationException(
                 $"EncryptionSettings:Key must decode to exactly 32 bytes (AES-256); got {_key.Length}");
+
+        IsConfigured = true;
     }
 
     /// <summary>
@@ -33,6 +42,9 @@ public sealed class EncryptionService
     /// <returns>Path of the encrypted output file.</returns>
     public async Task<string> EncryptAsync(string inputPath, CancellationToken ct)
     {
+        if (!IsConfigured)
+            throw new InvalidOperationException("EncryptionService is not configured: EncryptionSettings:Key is missing.");
+
         var outputPath = inputPath + ".enc";
 
         _logger.LogInformation("Encrypting '{InputPath}' → '{OutputPath}'", inputPath, outputPath);

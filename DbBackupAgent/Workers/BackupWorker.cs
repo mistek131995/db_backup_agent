@@ -9,19 +9,39 @@ public sealed class BackupWorker : BackgroundService
 {
     private readonly BackupJob _job;
     private readonly ScheduleService _schedule;
+    private readonly EncryptionService _encryption;
     private readonly List<DatabaseConfig> _databases;
     private readonly ILogger<BackupWorker> _logger;
 
     public BackupWorker(
         BackupJob job,
         ScheduleService schedule,
+        EncryptionService encryption,
         IOptions<List<DatabaseConfig>> databases,
         ILogger<BackupWorker> logger)
     {
         _job = job;
         _schedule = schedule;
+        _encryption = encryption;
         _databases = databases.Value;
         _logger = logger;
+    }
+
+    private bool IsConfigured()
+    {
+        if (_databases.Count == 0)
+        {
+            _logger.LogWarning("BackupWorker: no databases configured. Fill in appsettings.json and restart.");
+            return false;
+        }
+
+        if (!_encryption.IsConfigured)
+        {
+            _logger.LogWarning("BackupWorker: encryption key is not configured. Fill in appsettings.json and restart.");
+            return false;
+        }
+
+        return true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -44,9 +64,13 @@ public sealed class BackupWorker : BackgroundService
                 }
                 else if (nextRun.Value <= DateTime.UtcNow && (lastRun is null || nextRun > lastRun))
                 {
+                    lastRun = nextRun;
+
+                    if (!IsConfigured())
+                        continue;
+
                     _logger.LogInformation(
                         "BackupWorker: scheduled run triggered (nextRun={NextRun:u})", nextRun.Value);
-                    lastRun = nextRun;
                     await RunAllDatabasesAsync(stoppingToken);
                 }
                 else
