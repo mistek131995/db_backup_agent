@@ -4,10 +4,6 @@ public static class ConfigBootstrapper
 {
     private const string Template = """
         {
-          "AgentSettings": {
-            "Token": "",
-            "DashboardUrl": ""
-          },
           "Databases": [
             {
               "DatabaseType": "Postgres",

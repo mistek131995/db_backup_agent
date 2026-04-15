@@ -15,6 +15,9 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddJsonFile(
     Path.Combine(configDir, "appsettings.json"), optional: true, reloadOnChange: false);
 
+// Env vars must win over the external config file
+builder.Configuration.AddEnvironmentVariables();
+
 builder.Services.Configure<List<DatabaseConfig>>(
     builder.Configuration.GetSection("Databases"));
 
