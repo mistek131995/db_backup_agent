@@ -1,0 +1,12 @@
+namespace DbBackupAgent.Models;
+
+public sealed class BackupReportDto
+{
+    public string DatabaseName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty; // "success" | "failed"
+    public long SizeBytes { get; set; }
+    public long DurationMs { get; set; }
+    public string StoragePath { get; set; } = string.Empty;
+    public string? ErrorMessage { get; set; }
+    public DateTime BackupAt { get; set; }
+}

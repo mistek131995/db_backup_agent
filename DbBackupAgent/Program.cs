@@ -1,0 +1,45 @@
+using DbBackupAgent;
+using DbBackupAgent.Models;
+using DbBackupAgent.Providers;
+using DbBackupAgent.Services;
+using DbBackupAgent.Settings;
+using DbBackupAgent.Workers;
+using SftpSettings = DbBackupAgent.Models.SftpSettings;
+using UploadSettings = DbBackupAgent.Models.UploadSettings;
+
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.Configure<List<DatabaseConfig>>(
+    builder.Configuration.GetSection("Databases"));
+
+builder.Services.Configure<EncryptionSettings>(
+    builder.Configuration.GetSection("EncryptionSettings"));
+
+builder.Services.Configure<S3Settings>(
+    builder.Configuration.GetSection("S3Settings"));
+
+builder.Services.Configure<SftpSettings>(
+    builder.Configuration.GetSection("SftpSettings"));
+
+builder.Services.Configure<UploadSettings>(
+    builder.Configuration.GetSection("UploadSettings"));
+
+builder.Services.Configure<AgentSettings>(
+    builder.Configuration.GetSection("AgentSettings"));
+
+builder.Services.AddSingleton<PostgresBackupProvider>();
+builder.Services.AddSingleton<MssqlBackupProvider>();
+builder.Services.AddSingleton<IBackupProviderFactory, BackupProviderFactory>();
+
+builder.Services.AddSingleton<EncryptionService>();
+builder.Services.AddSingleton<FileSnapshotService>();
+builder.Services.AddSingleton<S3UploadService>();
+builder.Services.AddSingleton<SftpUploadService>();
+builder.Services.AddSingleton<UploadServiceFactory>();
+builder.Services.AddHttpClient<ReportService>();
+builder.Services.AddHttpClient<ScheduleService>();
+builder.Services.AddSingleton<BackupJob>();
+builder.Services.AddHostedService<BackupWorker>();
+
+var host = builder.Build();
+host.Run();
