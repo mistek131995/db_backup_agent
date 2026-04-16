@@ -9,4 +9,10 @@ public sealed class BackupReportDto
     public string StoragePath { get; set; } = string.Empty;
     public string? ErrorMessage { get; set; }
     public DateTime BackupAt { get; set; }
+
+    public string? ManifestKey { get; set; }
+    public int? FilesCount { get; set; }
+    public long? FilesTotalBytes { get; set; }
+    public int? NewChunksCount { get; set; }
+    public string? FileBackupError { get; set; }
 }

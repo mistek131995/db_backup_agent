@@ -81,4 +81,27 @@ public sealed class EncryptionService
 
         return outputPath;
     }
+
+    public byte[] Encrypt(byte[] plaintext)
+    {
+        if (!IsConfigured)
+            throw new InvalidOperationException("EncryptionService is not configured: EncryptionSettings:Key is missing.");
+
+        ArgumentNullException.ThrowIfNull(plaintext);
+
+        using var aes = Aes.Create();
+        aes.KeySize = 256;
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+        aes.Key = _key;
+        aes.GenerateIV();
+
+        using var encryptor = aes.CreateEncryptor();
+        var ciphertext = encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length);
+
+        var output = new byte[aes.IV.Length + ciphertext.Length];
+        Buffer.BlockCopy(aes.IV, 0, output, 0, aes.IV.Length);
+        Buffer.BlockCopy(ciphertext, 0, output, aes.IV.Length, ciphertext.Length);
+        return output;
+    }
 }

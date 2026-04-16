@@ -16,11 +16,10 @@ public sealed class SftpUploadService : IUploadService
         _logger = logger;
     }
 
-    public async Task<string> UploadAsync(string filePath, string database, CancellationToken ct)
+    public async Task<string> UploadAsync(string filePath, string folder, CancellationToken ct)
     {
         var fileName = Path.GetFileName(filePath);
-        var date = DateTime.UtcNow.ToString("yyyy-MM-dd");
-        var remoteDir = $"{_settings.RemotePath.TrimEnd('/')}/{database}/{date}";
+        var remoteDir = $"{_settings.RemotePath.TrimEnd('/')}/{folder.TrimEnd('/')}";
         var remotePath = $"{remoteDir}/{fileName}";
 
         _logger.LogInformation(
@@ -50,6 +49,12 @@ public sealed class SftpUploadService : IUploadService
 
         return storagePath;
     }
+
+    public Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct) =>
+        throw new NotSupportedException("Byte-array upload is not supported for SFTP provider. File backup with deduplication requires S3.");
+
+    public Task<bool> ExistsAsync(string objectKey, CancellationToken ct) =>
+        throw new NotSupportedException("ExistsAsync is not supported for SFTP provider. File backup with deduplication requires S3.");
 
     // -------------------------------------------------------------------------
 

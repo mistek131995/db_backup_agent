@@ -58,14 +58,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine tags
+        id: tags
+        run: |
+          if [[ "${{ github.ref_name }}" == *e ]]; then
+            echo "tags=ghcr.io/${{ github.repository }}:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            printf "tags<<EOF\nghcr.io/${{ github.repository }}:${{ github.ref_name }}\nghcr.io/${{ github.repository }}:latest\nEOF\n" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.tags.outputs.tags }}
 
   # ── GitHub Release with artifacts ───────────────────────────────────────────
   release:
@@ -85,9 +92,12 @@ jobs:
 
       - name: Create GitHub Release
         run: |
+          PRERELEASE_FLAG=""
+          [[ "${{ github.ref_name }}" =~ [eb]$ ]] && PRERELEASE_FLAG="--prerelease"
           gh release create "${{ github.ref_name }}" \
             --title "Release ${{ github.ref_name }}" \
             --generate-notes \
+            $PRERELEASE_FLAG \
             artifacts/*.zip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

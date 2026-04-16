@@ -42,15 +42,13 @@ public sealed class S3UploadService : IUploadService, IDisposable
     }
 
     /// <summary>
-    /// Uploads <paramref name="filePath"/> to S3 under the key
-    /// <c>{database}/{yyyy-MM-dd}/{filename}</c>.
+    /// Uploads <paramref name="filePath"/> to S3 under the key <c>{folder}/{filename}</c>.
     /// </summary>
     /// <returns>Storage path in the form <c>s3://bucket/key</c>.</returns>
-    public async Task<string> UploadAsync(string filePath, string database, CancellationToken ct)
+    public async Task<string> UploadAsync(string filePath, string folder, CancellationToken ct)
     {
         var fileName = Path.GetFileName(filePath);
-        var date = DateTime.UtcNow.ToString("yyyy-MM-dd");
-        var objectKey = $"{database}/{date}/{fileName}";
+        var objectKey = $"{folder.TrimEnd('/')}/{fileName}";
 
         _logger.LogInformation(
             "Uploading '{FilePath}' → s3://{Bucket}/{ObjectKey}",
@@ -75,6 +73,40 @@ public sealed class S3UploadService : IUploadService, IDisposable
         _logger.LogInformation("Upload completed. StoragePath: '{StoragePath}'", storagePath);
 
         return storagePath;
+    }
+
+    public async Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+
+        using var stream = new MemoryStream(content, writable: false);
+
+        var request = new PutObjectRequest
+        {
+            BucketName = _settings.BucketName,
+            Key = objectKey,
+            InputStream = stream,
+            DisablePayloadSigning = true,
+        };
+        request.Headers.ContentLength = content.Length;
+
+        await GetClient().PutObjectAsync(request, ct);
+    }
+
+    public async Task<bool> ExistsAsync(string objectKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+
+        try
+        {
+            await GetClient().GetObjectMetadataAsync(_settings.BucketName, objectKey, ct);
+            return true;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return false;
+        }
     }
 
     public void Dispose() => _client?.Dispose();

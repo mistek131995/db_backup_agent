@@ -25,4 +25,8 @@
     <Content Include="..\appsettings.json" CopyToOutputDirectory="Always" Link="appsettings.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbBackupAgent.Tests" />
+  </ItemGroup>
+
 </Project>

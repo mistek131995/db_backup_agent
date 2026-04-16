@@ -12,7 +12,8 @@ public static class ConfigBootstrapper
               "Database": "",
               "Username": "",
               "Password": "",
-              "OutputPath": "/backups"
+              "OutputPath": "/backups",
+              "FilePaths": []
             }
           ],
           "EncryptionSettings": {

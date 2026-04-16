@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace DbBackupAgent.Services;
 
-public sealed class UploadServiceFactory
+public sealed class UploadServiceFactory : IUploadServiceFactory
 {
     private readonly UploadSettings _uploadSettings;
     private readonly S3UploadService _s3;

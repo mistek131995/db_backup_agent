@@ -47,10 +47,12 @@ builder.Services.AddSingleton<MssqlBackupProvider>();
 builder.Services.AddSingleton<IBackupProviderFactory, BackupProviderFactory>();
 
 builder.Services.AddSingleton<EncryptionService>();
-builder.Services.AddSingleton<FileSnapshotService>();
+builder.Services.AddSingleton<ContentDefinedChunker>();
+builder.Services.AddSingleton<FileBackupService>();
+builder.Services.AddSingleton<ManifestStore>();
 builder.Services.AddSingleton<S3UploadService>();
 builder.Services.AddSingleton<SftpUploadService>();
-builder.Services.AddSingleton<UploadServiceFactory>();
+builder.Services.AddSingleton<IUploadServiceFactory, UploadServiceFactory>();
 builder.Services.AddHttpClient<ReportService>();
 builder.Services.AddHttpClient<ScheduleService>();
 builder.Services.AddSingleton<BackupJob>();
