@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using DbBackupAgent.Models;
 using DbBackupAgent.Providers;
@@ -157,6 +158,7 @@ public sealed class BackupJobTests
             report,
             Options.Create(new UploadSettings { Provider = provider }),
             Options.Create(new AgentSettings { Token = "test-token", DashboardUrl = "http://localhost" }),
+            new ActivitySource("DbBackupAgent.Tests"),
             NullLogger<BackupJob>.Instance);
     }
 

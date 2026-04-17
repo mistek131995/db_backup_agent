@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DbBackupAgent;
 using DbBackupAgent.Models;
 using DbBackupAgent.Providers;
@@ -45,6 +46,14 @@ builder.Services.Configure<AgentSettings>(
 builder.Services.AddSingleton<PostgresBackupProvider>();
 builder.Services.AddSingleton<MssqlBackupProvider>();
 builder.Services.AddSingleton<IBackupProviderFactory, BackupProviderFactory>();
+
+ActivitySource.AddActivityListener(new ActivityListener
+{
+    ShouldListenTo = source => source.Name == "DbBackupAgent",
+    Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+});
+
+builder.Services.AddSingleton(new ActivitySource("DbBackupAgent"));
 
 builder.Services.AddSingleton<EncryptionService>();
 builder.Services.AddSingleton<ContentDefinedChunker>();

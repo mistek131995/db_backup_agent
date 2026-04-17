@@ -1,8 +1,8 @@
+using System.Diagnostics;
 using DbBackupAgent.Models;
 using DbBackupAgent.Providers;
 using DbBackupAgent.Services;
 using DbBackupAgent.Settings;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DbBackupAgent;
@@ -17,6 +17,7 @@ public sealed class BackupJob
     private readonly ReportService _report;
     private readonly UploadSettings _uploadSettings;
     private readonly AgentSettings _agentSettings;
+    private readonly ActivitySource _activitySource;
     private readonly ILogger<BackupJob> _logger;
 
     public BackupJob(
@@ -28,6 +29,7 @@ public sealed class BackupJob
         ReportService report,
         IOptions<UploadSettings> uploadSettings,
         IOptions<AgentSettings> agentSettings,
+        ActivitySource activitySource,
         ILogger<BackupJob> logger)
     {
         _factory = factory;
@@ -38,17 +40,21 @@ public sealed class BackupJob
         _report = report;
         _uploadSettings = uploadSettings.Value;
         _agentSettings = agentSettings.Value;
+        _activitySource = activitySource;
         _logger = logger;
     }
 
     public async Task<BackupResult> RunAsync(DatabaseConfig config, CancellationToken ct)
     {
+        using var activity = _activitySource.StartActivity("backup.run");
+        activity?.SetTag("database", config.Database);
+
         var provider = _factory.GetProvider(config.DatabaseType);
         var backupFolder = $"{config.Database}_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}";
 
         _logger.LogInformation(
-            "BackupJob starting. Provider: {ProviderType}, Database: '{Database}', Folder: '{Folder}'",
-            provider.GetType().Name, config.Database, backupFolder);
+            "BackupJob starting. Provider: {ProviderType}, Database: '{Database}', Folder: '{Folder}', TraceId: {TraceId}",
+            provider.GetType().Name, config.Database, backupFolder, activity?.TraceId.ToString() ?? "-");
 
         string? dumpFile = null;
         string? encryptedFile = null;
