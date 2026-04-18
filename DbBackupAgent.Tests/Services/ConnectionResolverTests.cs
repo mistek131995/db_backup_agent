@@ -1,4 +1,4 @@
-using DbBackupAgent.Models;
+using DbBackupAgent.Configuration;
 using DbBackupAgent.Services;
 
 namespace DbBackupAgent.Tests.Services;

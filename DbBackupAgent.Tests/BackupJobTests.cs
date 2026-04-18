@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using DbBackupAgent.Models;
+using DbBackupAgent.Configuration;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Providers;
 using DbBackupAgent.Services;
 using DbBackupAgent.Settings;
@@ -33,7 +34,7 @@ public sealed class BackupJobTests
     [Test]
     public async Task CaptureFilesSafelyAsync_EmptyFilePaths_ReturnsBothNull()
     {
-        var job = BuildJob(provider: "S3");
+        var job = BuildJob(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [] };
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
@@ -53,7 +54,7 @@ public sealed class BackupJobTests
     {
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "a.bin"), new byte[] { 1, 2, 3 });
 
-        var job = BuildJob(provider: "Sftp");
+        var job = BuildJob(UploadProvider.Sftp);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
@@ -74,7 +75,7 @@ public sealed class BackupJobTests
         var content = RandomNumberGenerator.GetBytes(1024);
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "file.bin"), content);
 
-        var job = BuildJob(provider: "S3");
+        var job = BuildJob(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "customers", FilePaths = [_tempRoot] };
         const string backupFolder = "customers_2026-04-17_14-30-00";
         const string dumpKey = "customers_2026-04-17_14-30-00/dump.sql.gz.enc";
@@ -100,7 +101,7 @@ public sealed class BackupJobTests
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "file.bin"), new byte[] { 1, 2, 3, 4 });
         _uploader.ThrowOnUpload = new InvalidOperationException("simulated S3 403");
 
-        var job = BuildJob(provider: "S3");
+        var job = BuildJob(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
@@ -122,7 +123,7 @@ public sealed class BackupJobTests
         for (int i = 0; i < 3; i++)
             File.WriteAllBytes(Path.Combine(_tempRoot, $"f{i}.bin"), new byte[] { (byte)i });
 
-        var job = BuildJob(provider: "S3");
+        var job = BuildJob(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
         using var cts = new CancellationTokenSource();
@@ -132,7 +133,7 @@ public sealed class BackupJobTests
             job.CaptureFilesSafelyAsync(config, "db1_2026-04-17_14-30-00", "dump.enc", cts.Token));
     }
 
-    private BackupJob BuildJob(string provider)
+    private BackupJob BuildJob(UploadProvider provider)
     {
         var encKey = RandomNumberGenerator.GetBytes(32);
         var encryption = new EncryptionService(

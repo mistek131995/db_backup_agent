@@ -1,12 +1,10 @@
 using System.Diagnostics;
-using DbBackupAgent;
-using DbBackupAgent.Models;
+using DbBackupAgent.Configuration;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Providers;
 using DbBackupAgent.Services;
 using DbBackupAgent.Settings;
 using DbBackupAgent.Workers;
-using SftpSettings = DbBackupAgent.Models.SftpSettings;
-using UploadSettings = DbBackupAgent.Models.UploadSettings;
 
 var defaultConfigDir = OperatingSystem.IsWindows()
     ? Path.Combine(AppContext.BaseDirectory, "config")
@@ -40,8 +38,11 @@ builder.Services.Configure<S3Settings>(
 builder.Services.Configure<SftpSettings>(
     builder.Configuration.GetSection("SftpSettings"));
 
-builder.Services.Configure<UploadSettings>(
-    builder.Configuration.GetSection("UploadSettings"));
+builder.Services.AddOptions<UploadSettings>()
+    .Bind(builder.Configuration.GetSection("UploadSettings"))
+    .Validate(s => Enum.IsDefined(s.Provider),
+        $"UploadSettings:Provider must be one of: {string.Join(", ", Enum.GetNames<UploadProvider>())}")
+    .ValidateOnStart();
 
 builder.Services.Configure<AgentSettings>(
     builder.Configuration.GetSection("AgentSettings"));

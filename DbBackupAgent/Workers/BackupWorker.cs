@@ -1,4 +1,4 @@
-using DbBackupAgent.Models;
+using DbBackupAgent.Configuration;
 using DbBackupAgent.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

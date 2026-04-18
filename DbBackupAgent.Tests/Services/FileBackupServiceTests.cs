@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
-using DbBackupAgent.Models;
 using DbBackupAgent.Services;
+using DbBackupAgent.Settings;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 

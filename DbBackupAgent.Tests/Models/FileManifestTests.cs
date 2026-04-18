@@ -1,5 +1,5 @@
 using System.Text.Json;
-using DbBackupAgent.Models;
+using DbBackupAgent.Domain;
 
 namespace DbBackupAgent.Tests.Models;
 
