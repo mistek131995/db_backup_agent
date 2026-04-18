@@ -56,6 +56,12 @@ public sealed class SftpUploadService : IUploadService
     public Task<bool> ExistsAsync(string objectKey, CancellationToken ct) =>
         throw new NotSupportedException("ExistsAsync is not supported for SFTP provider. File backup with deduplication requires S3.");
 
+    public Task DownloadAsync(string objectKey, string localPath, CancellationToken ct) =>
+        throw new NotSupportedException("DownloadAsync is not supported for SFTP provider. Restore requires S3.");
+
+    public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
+        throw new NotSupportedException("DownloadBytesAsync is not supported for SFTP provider. Restore requires S3.");
+
     // -------------------------------------------------------------------------
 
     private SftpClient BuildClient()

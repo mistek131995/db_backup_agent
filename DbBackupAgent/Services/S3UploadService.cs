@@ -109,5 +109,74 @@ public sealed class S3UploadService : IUploadService, IDisposable
         }
     }
 
+    public async Task DownloadAsync(string objectKey, string localPath, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+
+        _logger.LogInformation(
+            "Downloading s3://{Bucket}/{ObjectKey} → '{LocalPath}'",
+            _settings.BucketName, objectKey, localPath);
+
+        GetObjectResponse response;
+        try
+        {
+            response = await GetClient().GetObjectAsync(_settings.BucketName, objectKey, ct);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new FileNotFoundException(
+                $"S3 object '{objectKey}' not found in bucket '{_settings.BucketName}'.", objectKey);
+        }
+
+        var tmpPath = localPath + ".download-tmp";
+
+        try
+        {
+            using (response)
+            await using (var fileStream = new FileStream(
+                tmpPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                bufferSize: 65536, useAsync: true))
+            {
+                await response.ResponseStream.CopyToAsync(fileStream, ct);
+            }
+
+            File.Move(tmpPath, localPath, overwrite: true);
+        }
+        catch
+        {
+            if (File.Exists(tmpPath))
+            {
+                try { File.Delete(tmpPath); } catch { }
+            }
+            throw;
+        }
+
+        _logger.LogInformation("Download completed: '{LocalPath}'", localPath);
+    }
+
+    public async Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+
+        GetObjectResponse response;
+        try
+        {
+            response = await GetClient().GetObjectAsync(_settings.BucketName, objectKey, ct);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new FileNotFoundException(
+                $"S3 object '{objectKey}' not found in bucket '{_settings.BucketName}'.", objectKey);
+        }
+
+        using (response)
+        {
+            using var memory = new MemoryStream();
+            await response.ResponseStream.CopyToAsync(memory, ct);
+            return memory.ToArray();
+        }
+    }
+
     public void Dispose() => _client?.Dispose();
 }

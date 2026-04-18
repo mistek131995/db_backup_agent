@@ -186,6 +186,12 @@ public sealed class BackupJobTests
             ExistsCalls++;
             return Task.FromResult(Uploaded.ContainsKey(objectKey));
         }
+
+        public Task DownloadAsync(string objectKey, string localPath, CancellationToken ct) =>
+            throw new NotSupportedException("BackupJob must not call DownloadAsync");
+
+        public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
+            throw new NotSupportedException("BackupJob must not call DownloadBytesAsync");
     }
 
     private sealed class StubUploadServiceFactory(IUploadService service) : IUploadServiceFactory

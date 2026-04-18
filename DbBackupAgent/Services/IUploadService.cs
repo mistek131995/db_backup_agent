@@ -13,4 +13,8 @@ public interface IUploadService
     Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct);
 
     Task<bool> ExistsAsync(string objectKey, CancellationToken ct);
+
+    Task DownloadAsync(string objectKey, string localPath, CancellationToken ct);
+
+    Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct);
 }
