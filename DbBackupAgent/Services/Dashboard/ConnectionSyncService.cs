@@ -123,7 +123,7 @@ public sealed class ConnectionSyncService : IConnectionSyncService
             items.Add(new ConnectionSyncItemDto
             {
                 Name = conn.Name,
-                DatabaseType = conn.DatabaseType,
+                DatabaseType = conn.DatabaseType.ToString(),
                 Host = conn.Host,
                 Port = conn.Port,
             });

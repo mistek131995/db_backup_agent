@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Contracts;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Exceptions;
 using DbBackupAgent.Providers;
 using DbBackupAgent.Services;
@@ -379,7 +380,7 @@ public sealed class DatabaseRestoreServiceTests
     private static ConnectionConfig ConnPg(string name) => new()
     {
         Name = name,
-        DatabaseType = "Postgres",
+        DatabaseType = DatabaseType.Postgres,
         Host = "127.0.0.1",
         Port = 5432,
         Username = "u",
@@ -449,7 +450,7 @@ public sealed class DatabaseRestoreServiceTests
 
     private sealed class StubRestoreProviderFactory(IRestoreProvider provider) : IRestoreProviderFactory
     {
-        public IRestoreProvider GetProvider(string databaseType) => provider;
+        public IRestoreProvider GetProvider(DatabaseType databaseType) => provider;
     }
 
     private sealed class FakeUploadService : IUploadService

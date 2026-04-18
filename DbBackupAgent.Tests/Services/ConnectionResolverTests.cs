@@ -1,4 +1,5 @@
 using DbBackupAgent.Configuration;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Services;
 using DbBackupAgent.Services.Common;
 
@@ -13,7 +14,7 @@ public sealed class ConnectionResolverTests
         var conn = new ConnectionConfig
         {
             Name = "main-pg",
-            DatabaseType = "Postgres",
+            DatabaseType = DatabaseType.Postgres,
             Host = "db.internal",
             Port = 5432,
             Username = "u",

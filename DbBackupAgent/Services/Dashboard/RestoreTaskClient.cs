@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DbBackupAgent.Contracts;
 using DbBackupAgent.Settings;
 using Microsoft.Extensions.Logging;
@@ -17,6 +19,12 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
         TimeSpan.FromSeconds(2),
         TimeSpan.FromSeconds(4),
     ];
+
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+        };
 
     private readonly HttpClient _http;
     private readonly AgentSettings _settings;
@@ -74,7 +82,7 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
         {
             using var request = new HttpRequestMessage(HttpMethod.Patch, url);
             request.Headers.Add("X-Agent-Token", _settings.Token);
-            request.Content = JsonContent.Create(patch);
+            request.Content = JsonContent.Create(patch, options: JsonOptions);
 
             using var response = await _http.SendAsync(request, innerCt);
             response.EnsureSuccessStatusCode();

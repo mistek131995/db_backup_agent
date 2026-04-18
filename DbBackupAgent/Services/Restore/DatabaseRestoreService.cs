@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Contracts;
 using DbBackupAgent.Domain;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Exceptions;
 using DbBackupAgent.Providers;
 using DbBackupAgent.Services.Common;
@@ -10,6 +11,7 @@ using DbBackupAgent.Settings;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MySqlConnector;
 using Npgsql;
 
 namespace DbBackupAgent.Services;
@@ -74,14 +76,14 @@ public sealed class DatabaseRestoreService
             SafeDelete(encryptedPath);
 
             string restoreFilePath;
-            if (connection.DatabaseType.Equals("Postgres", StringComparison.Ordinal))
+            if (connection.DatabaseType is DatabaseType.Postgres or DatabaseType.Mysql)
             {
                 var sqlPath = Path.Combine(tempDir, "dump.sql");
                 await DecompressGzipAsync(decryptedPath, sqlPath, ct);
                 SafeDelete(decryptedPath);
                 restoreFilePath = sqlPath;
             }
-            else if (connection.DatabaseType.Equals("Mssql", StringComparison.Ordinal))
+            else if (connection.DatabaseType == DatabaseType.Mssql)
             {
                 var fileName = $"{targetDatabase}_{task.TaskId:N}.bak";
                 var sqlDir = MssqlSharedPathResolver.GetSqlDir(connection, tempDir);
@@ -97,7 +99,7 @@ public sealed class DatabaseRestoreService
             else
             {
                 throw new InvalidOperationException(
-                    $"Unsupported DatabaseType: '{connection.DatabaseType}'. Supported: Postgres, Mssql.");
+                    $"Unsupported DatabaseType: '{connection.DatabaseType}'. Supported: Postgres, Mssql, Mysql.");
             }
 
             await provider.PrepareTargetDatabaseAsync(connection, targetDatabase, ct);
@@ -131,6 +133,13 @@ public sealed class DatabaseRestoreService
             return DatabaseRestoreResult.Failed(
                 $"Недостаточно прав у пользователя MSSQL при выполнении restore БД '{targetDatabase}'. " +
                 "Требуется членство в server-роли sysadmin или dbcreator.");
+        }
+        catch (MySqlException ex) when (IsMysqlPermissionError(ex))
+        {
+            _logger.LogError(ex, "DatabaseRestoreService: MySQL permission denied for task {TaskId}", task.TaskId);
+            return DatabaseRestoreResult.Failed(
+                $"Недостаточно прав у пользователя MySQL при выполнении restore БД '{targetDatabase}'. " +
+                $"Требуются привилегии CREATE и DROP на БД либо глобально (ON *.*).");
         }
         catch (AuthenticationTagMismatchException ex)
         {
@@ -230,6 +239,9 @@ public sealed class DatabaseRestoreService
 
     internal static bool IsKnownMssqlPermissionCode(int errorNumber) =>
         Array.IndexOf(MssqlPermissionErrorCodes, errorNumber) >= 0;
+
+    private static bool IsMysqlPermissionError(MySqlException ex) =>
+        ex.Number is 1044 or 1045 or 1142 or 1143 or 1227;
 
     private void SafeDelete(string path)
     {

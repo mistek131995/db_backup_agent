@@ -1,4 +1,5 @@
 using DbBackupAgent.Domain;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Workers;
 
 namespace DbBackupAgent.Tests.Workers;
@@ -15,9 +16,9 @@ public sealed class RestoreTaskPollingServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo("success"));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo("success"));
-            Assert.That(patch.FilesStatus, Is.EqualTo("success"));
+            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Success));
+            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Success));
             Assert.That(patch.ErrorMessage, Is.Null);
             Assert.That(patch.FilesRestoredCount, Is.EqualTo(3));
             Assert.That(patch.FilesFailedCount, Is.Null);
@@ -33,9 +34,9 @@ public sealed class RestoreTaskPollingServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo("success"));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo("success"));
-            Assert.That(patch.FilesStatus, Is.EqualTo("skipped"));
+            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Success));
+            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Skipped));
             Assert.That(patch.ErrorMessage, Is.Null);
             Assert.That(patch.FilesRestoredCount, Is.Null);
             Assert.That(patch.FilesFailedCount, Is.Null);
@@ -51,9 +52,9 @@ public sealed class RestoreTaskPollingServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo("partial"));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo("success"));
-            Assert.That(patch.FilesStatus, Is.EqualTo("partial"));
+            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Partial));
+            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(patch.ErrorMessage, Is.EqualTo("f-err"));
             Assert.That(patch.FilesRestoredCount, Is.EqualTo(5));
             Assert.That(patch.FilesFailedCount, Is.EqualTo(2));
@@ -71,9 +72,9 @@ public sealed class RestoreTaskPollingServiceTests
         {
             // "files=failed" while the DB was restored is reported as overall=partial,
             // not failed — the DB state is valid and the operator needs to know that.
-            Assert.That(patch.Status, Is.EqualTo("partial"));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo("success"));
-            Assert.That(patch.FilesStatus, Is.EqualTo("failed"));
+            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Partial));
+            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Failed));
             Assert.That(patch.ErrorMessage, Is.EqualTo("f-err"));
         });
     }
@@ -87,9 +88,9 @@ public sealed class RestoreTaskPollingServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo("failed"));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo("failed"));
-            Assert.That(patch.FilesStatus, Is.EqualTo("success"));
+            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Failed));
+            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Failed));
+            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Success));
             Assert.That(patch.ErrorMessage, Is.EqualTo("db-err"));
             Assert.That(patch.FilesRestoredCount, Is.EqualTo(4));
         });
@@ -104,9 +105,9 @@ public sealed class RestoreTaskPollingServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo("failed"));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo("failed"));
-            Assert.That(patch.FilesStatus, Is.EqualTo("failed"));
+            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Failed));
+            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Failed));
+            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Failed));
             Assert.That(patch.ErrorMessage, Is.EqualTo("db-err\n\nf-err"));
         });
     }

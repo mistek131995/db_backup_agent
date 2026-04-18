@@ -1,5 +1,6 @@
 using DbBackupAgent.Contracts;
 using DbBackupAgent.Domain;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Services;
 using Microsoft.Extensions.Logging;
 
@@ -104,18 +105,16 @@ public sealed class RestoreTaskPollingService : BackgroundService
 
     internal static PatchRestoreTaskDto CombineResults(DatabaseRestoreResult db, FileRestoreResult files)
     {
-        var databaseStatus = db.IsSuccess ? "success" : "failed";
+        var databaseStatus = db.IsSuccess ? RestoreDatabaseStatus.Success : RestoreDatabaseStatus.Failed;
         var filesStatus = files.Status;
 
-        string overallStatus;
-        if (!db.IsSuccess && filesStatus == "failed")
-            overallStatus = "failed";
-        else if (!db.IsSuccess)
-            overallStatus = "failed";
-        else if (filesStatus == "failed" || filesStatus == "partial")
-            overallStatus = "partial";
+        RestoreTaskStatus overallStatus;
+        if (!db.IsSuccess)
+            overallStatus = RestoreTaskStatus.Failed;
+        else if (filesStatus is RestoreFilesStatus.Failed or RestoreFilesStatus.Partial)
+            overallStatus = RestoreTaskStatus.Partial;
         else
-            overallStatus = "success";
+            overallStatus = RestoreTaskStatus.Success;
 
         string? errorMessage;
         if (db.ErrorMessage is not null && files.ErrorMessage is not null)

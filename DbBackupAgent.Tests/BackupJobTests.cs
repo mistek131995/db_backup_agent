@@ -204,7 +204,7 @@ public sealed class BackupJobTests
 
     private sealed class StubBackupProviderFactory : IBackupProviderFactory
     {
-        public IBackupProvider GetProvider(string databaseType) =>
+        public IBackupProvider GetProvider(DatabaseType databaseType) =>
             throw new NotSupportedException("CaptureFilesSafelyAsync must not touch the backup provider");
     }
 

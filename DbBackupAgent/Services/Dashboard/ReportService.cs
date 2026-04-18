@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DbBackupAgent.Contracts;
 using DbBackupAgent.Settings;
 using Microsoft.Extensions.Logging;
@@ -14,6 +16,12 @@ public sealed class ReportService
     private readonly AgentSettings _settings;
     private readonly ILogger<ReportService> _logger;
     private readonly ResiliencePipeline _pipeline;
+
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+        };
 
     // Fixed delays: attempt 0 → 1 s, attempt 1 → 2 s, attempt 2 → 4 s
     private static readonly TimeSpan[] RetryDelays =
@@ -50,7 +58,7 @@ public sealed class ReportService
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Add("X-Agent-Token", _settings.Token);
-                request.Content = JsonContent.Create(dto);
+                request.Content = JsonContent.Create(dto, options: JsonOptions);
 
                 var response = await _http.SendAsync(request, innerCt);
                 response.EnsureSuccessStatusCode();

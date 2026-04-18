@@ -1,9 +1,11 @@
+using DbBackupAgent.Enums;
+
 namespace DbBackupAgent.Contracts;
 
 public sealed class BackupReportDto
 {
     public string DatabaseName { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty; // "success" | "failed"
+    public BackupStatus Status { get; set; }
     public long SizeBytes { get; set; }
     public long DurationMs { get; set; }
     public string DumpObjectKey { get; set; } = string.Empty;

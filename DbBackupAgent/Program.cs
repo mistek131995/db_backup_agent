@@ -54,10 +54,12 @@ builder.Services.Configure<RestoreSettings>(
 
 builder.Services.AddSingleton<PostgresBackupProvider>();
 builder.Services.AddSingleton<MssqlBackupProvider>();
+builder.Services.AddSingleton<MysqlBackupProvider>();
 builder.Services.AddSingleton<IBackupProviderFactory, BackupProviderFactory>();
 
 builder.Services.AddSingleton<PostgresRestoreProvider>();
 builder.Services.AddSingleton<MssqlRestoreProvider>();
+builder.Services.AddSingleton<MysqlRestoreProvider>();
 builder.Services.AddSingleton<IRestoreProviderFactory, RestoreProviderFactory>();
 
 ActivitySource.AddActivityListener(new ActivityListener

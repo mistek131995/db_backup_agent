@@ -179,7 +179,7 @@ public sealed class BackupJob
         new()
         {
             DatabaseName = config.Database,
-            Status = result.Success ? "success" : "failed",
+            Status = result.Success ? BackupStatus.Success : BackupStatus.Failed,
             SizeBytes = result.SizeBytes,
             DurationMs = result.DurationMs,
             DumpObjectKey = result.DumpObjectKey ?? string.Empty,

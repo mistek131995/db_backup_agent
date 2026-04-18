@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using DbBackupAgent.Domain;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Services;
 using DbBackupAgent.Settings;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -56,7 +57,7 @@ public sealed class FileRestoreServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("success"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
             Assert.That(result.FilesRestoredCount, Is.Zero);
             Assert.That(_upload.ChunkDownloads, Is.Zero, "no chunks must be downloaded for empty manifest");
         });
@@ -72,7 +73,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var restored = await File.ReadAllBytesAsync(Path.Combine(_tempRoot, "data.bin"));
         Assert.That(restored, Is.EqualTo(content));
     }
@@ -98,7 +99,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var restored = await File.ReadAllBytesAsync(Path.Combine(_tempRoot, "out.bin"));
         Assert.That(restored, Is.EqualTo(expected));
     }
@@ -117,7 +118,7 @@ public sealed class FileRestoreServiceTests
         var target = Path.Combine(_tempRoot, "bad.bin");
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("partial"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(result.FilesFailedCount, Is.EqualTo(1));
             Assert.That(File.Exists(target), Is.False, "target must not exist when size check fails");
             Assert.That(File.Exists(target + ".restore-tmp"), Is.False, ".restore-tmp must be cleaned up");
@@ -141,7 +142,7 @@ public sealed class FileRestoreServiceTests
         var target = Path.Combine(_tempRoot, "f.bin");
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("partial"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(result.FilesFailedCount, Is.EqualTo(1));
             Assert.That(File.Exists(target), Is.False);
             Assert.That(File.Exists(target + ".restore-tmp"), Is.False);
@@ -163,7 +164,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         Assert.That(await File.ReadAllBytesAsync(target), Is.EqualTo(newContent));
     }
 
@@ -177,7 +178,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var expected = Path.Combine(_tempRoot, "C", "data", "file.txt");
         Assert.That(File.Exists(expected), Is.True, $"expected file at {expected}");
     }
@@ -192,7 +193,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var expected = Path.Combine(_tempRoot, "var", "log", "app.log");
         Assert.That(File.Exists(expected), Is.True, $"expected file at {expected}");
     }
@@ -207,7 +208,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var expected = Path.Combine(_tempRoot, "sub", "other", "leaf.bin");
         Assert.That(File.Exists(expected), Is.True, $"expected file at {expected}");
     }
@@ -223,7 +224,7 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, targetFileRoot: null, CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo("success"));
+        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         Assert.That(File.Exists(target), Is.True);
         Assert.That(await File.ReadAllBytesAsync(target), Is.EqualTo(content));
     }
@@ -249,7 +250,7 @@ public sealed class FileRestoreServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("partial"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(result.FilesRestoredCount, Is.EqualTo(2));
             Assert.That(result.FilesFailedCount, Is.EqualTo(1));
             Assert.That(File.Exists(Path.Combine(_tempRoot, "a.bin")), Is.True);
@@ -273,7 +274,7 @@ public sealed class FileRestoreServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("partial"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(result.FilesFailedCount, Is.EqualTo(1));
             Assert.That(result.ErrorMessage, Does.Contain("ошибка расшифровки чанка"));
         });
@@ -292,7 +293,7 @@ public sealed class FileRestoreServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("partial"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(result.FilesFailedCount, Is.EqualTo(25));
             Assert.That(result.ErrorMessage, Does.Contain("и ещё 5 ошибок"));
         });
@@ -330,7 +331,7 @@ public sealed class FileRestoreServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("failed"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Failed));
             Assert.That(result.ErrorMessage, Does.Contain("EncryptionKey"));
             Assert.That(_upload.ChunkDownloads, Is.Zero, "chunks must not be touched when manifest decrypt fails");
         });
@@ -347,7 +348,7 @@ public sealed class FileRestoreServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Status, Is.EqualTo("failed"));
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Failed));
             Assert.That(result.ErrorMessage, Does.Contain("JSON"));
         });
     }

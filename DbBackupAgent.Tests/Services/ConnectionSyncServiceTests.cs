@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Contracts;
+using DbBackupAgent.Enums;
 using DbBackupAgent.Services;
 using DbBackupAgent.Services.Common;
 using DbBackupAgent.Settings;
@@ -63,7 +64,7 @@ public sealed class ConnectionSyncServiceTests
             new ConnectionConfig
             {
                 Name = "good",
-                DatabaseType = "Postgres",
+                DatabaseType = DatabaseType.Postgres,
                 Host = "db.internal",
                 Port = 5432,
             },
@@ -92,8 +93,8 @@ public sealed class ConnectionSyncServiceTests
         var handler = new CapturingHandler(HttpStatusCode.NoContent);
         var service = Build(handler,
         [
-            new ConnectionConfig { Name = "a", DatabaseType = "Postgres", Host = "h1", Port = 5432 },
-            new ConnectionConfig { Name = "b", DatabaseType = "Mssql", Host = "h2", Port = 1433 },
+            new ConnectionConfig { Name = "a", DatabaseType = DatabaseType.Postgres, Host = "h1", Port = 5432 },
+            new ConnectionConfig { Name = "b", DatabaseType = DatabaseType.Mssql, Host = "h2", Port = 1433 },
         ],
         dashboardUrl: "http://dashboard.local:8080/");
 

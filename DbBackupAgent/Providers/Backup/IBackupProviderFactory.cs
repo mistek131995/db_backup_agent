@@ -1,6 +1,8 @@
+using DbBackupAgent.Enums;
+
 namespace DbBackupAgent.Providers;
 
 public interface IBackupProviderFactory
 {
-    IBackupProvider GetProvider(string databaseType);
+    IBackupProvider GetProvider(DatabaseType databaseType);
 }
