@@ -53,6 +53,13 @@ public sealed class ConnectionSyncService : IConnectionSyncService
             var payload = BuildPayload();
             var tokenHint = _settings.Token.Length >= 8 ? _settings.Token[..8] : _settings.Token;
 
+            if (payload.Connections.Count == 0)
+            {
+                _logger.LogWarning(
+                    "ConnectionSyncService: no fully configured connections to sync (all entries have empty Host). Skipping.");
+                return true;
+            }
+
             _logger.LogInformation(
                 "ConnectionSyncService: syncing {Count} connection(s), token '{TokenHint}...'",
                 payload.Connections.Count, tokenHint);
@@ -96,6 +103,23 @@ public sealed class ConnectionSyncService : IConnectionSyncService
         foreach (var name in _connections.Names)
         {
             var conn = _connections.Resolve(name);
+
+            if (string.IsNullOrWhiteSpace(conn.Host))
+            {
+                _logger.LogWarning(
+                    "ConnectionSyncService: skipping connection '{Name}' — Host is empty.",
+                    conn.Name);
+                continue;
+            }
+
+            if (conn.Port <= 0 || conn.Port > 65535)
+            {
+                _logger.LogWarning(
+                    "ConnectionSyncService: skipping connection '{Name}' — Port {Port} is out of range.",
+                    conn.Name, conn.Port);
+                continue;
+            }
+
             items.Add(new ConnectionSyncItemDto
             {
                 Name = conn.Name,
