@@ -2,12 +2,11 @@ using BackupsterAgent.Configuration;
 using BackupsterAgent.Contracts;
 using BackupsterAgent.Domain;
 using BackupsterAgent.Enums;
-using BackupsterAgent.Services;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Dashboard;
 using BackupsterAgent.Services.Restore;
 using BackupsterAgent.Services.Upload;
-using Microsoft.Extensions.Logging;
+using BackupsterAgent.Settings;
 using Microsoft.Extensions.Options;
 
 namespace BackupsterAgent.Workers;
@@ -25,6 +24,7 @@ public sealed class RestoreTaskPollingService : BackgroundService
     private readonly IProgressReporterFactory _reporterFactory;
     private readonly IUploadServiceFactory _uploadFactory;
     private readonly List<DatabaseConfig> _databases;
+    private readonly RestoreSettings _restoreSettings;
     private readonly ILogger<RestoreTaskPollingService> _logger;
 
     public RestoreTaskPollingService(
@@ -35,6 +35,7 @@ public sealed class RestoreTaskPollingService : BackgroundService
         IProgressReporterFactory reporterFactory,
         IUploadServiceFactory uploadFactory,
         IOptions<List<DatabaseConfig>> databases,
+        IOptions<RestoreSettings> restoreSettings,
         ILogger<RestoreTaskPollingService> logger)
     {
         _client = client;
@@ -44,6 +45,7 @@ public sealed class RestoreTaskPollingService : BackgroundService
         _reporterFactory = reporterFactory;
         _uploadFactory = uploadFactory;
         _databases = databases.Value;
+        _restoreSettings = restoreSettings.Value;
         _logger = logger;
     }
 
@@ -52,6 +54,8 @@ public sealed class RestoreTaskPollingService : BackgroundService
         _logger.LogInformation(
             "RestoreTaskPollingService started. Poll interval: {PollSec}s, initial backoff: {BackoffSec}s, max backoff: {MaxSec}s",
             PollInterval.TotalSeconds, InitialBackoff.TotalSeconds, MaxBackoff.TotalSeconds);
+
+        CleanupOrphanTemp();
 
         var backoff = InitialBackoff;
 
@@ -170,6 +174,49 @@ public sealed class RestoreTaskPollingService : BackgroundService
             : await _fileRestore.RunAsync(task.ManifestKey, task.TargetFileRoot, uploader, reporter, ct);
 
         return CombineResults(dbResult, fileResult);
+    }
+
+    private void CleanupOrphanTemp()
+    {
+        var tempRoot = DatabaseRestoreService.BuildTempRoot(_restoreSettings.TempPath);
+        try
+        {
+            if (!Directory.Exists(tempRoot))
+            {
+                _logger.LogDebug("Restore temp root '{TempRoot}' does not exist, nothing to clean.", tempRoot);
+                return;
+            }
+
+            var entries = Directory.EnumerateFileSystemEntries(tempRoot).ToList();
+            if (entries.Count == 0)
+            {
+                _logger.LogDebug("Restore temp root '{TempRoot}' is already clean.", tempRoot);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Cleaning {Count} orphan entries from restore temp root '{TempRoot}'",
+                entries.Count, tempRoot);
+
+            foreach (var entry in entries)
+            {
+                try
+                {
+                    if (Directory.Exists(entry))
+                        Directory.Delete(entry, recursive: true);
+                    else
+                        File.Delete(entry);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete orphan temp entry '{Entry}'", entry);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean restore temp root '{TempRoot}'", tempRoot);
+        }
     }
 
     internal static string? ValidateTaskNames(RestoreTaskForAgentDto task)

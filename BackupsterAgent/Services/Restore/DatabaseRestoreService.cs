@@ -213,16 +213,16 @@ public sealed class DatabaseRestoreService
     internal string ResolveTempDir(Guid taskId) =>
         BuildTempDir(_restoreSettings.TempPath, taskId);
 
-    internal static string BuildTempDir(string? tempPath, Guid taskId)
+    internal static string BuildTempRoot(string? tempPath)
     {
         var raw = string.IsNullOrWhiteSpace(tempPath) ? "./temp" : tempPath;
-
-        var absolute = Path.IsPathRooted(raw)
-            ? raw
+        return Path.IsPathRooted(raw)
+            ? Path.GetFullPath(raw)
             : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, raw));
-
-        return Path.Combine(absolute, taskId.ToString("N"));
     }
+
+    internal static string BuildTempDir(string? tempPath, Guid taskId) =>
+        Path.Combine(BuildTempRoot(tempPath), taskId.ToString("N"));
 
     private static async Task DecompressGzipAsync(string sourcePath, string destPath, CancellationToken ct)
     {

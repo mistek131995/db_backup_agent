@@ -11,7 +11,7 @@ public sealed class EncryptionService
     internal const int NonceSize = 12;
     internal const int TagSize = 16;
     internal const int FrameChunkSize = 1 << 20;
-    internal const int MaxFrameChunkSize = 64 << 20;
+    internal const int MaxFrameChunkSize = 8 << 20;
     internal static ReadOnlySpan<byte> FileMagic => [0x42, 0x4B, 0x30, 0x32];
     internal const int HeaderSize = 8;
 

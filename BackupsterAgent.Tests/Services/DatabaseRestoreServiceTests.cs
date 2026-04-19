@@ -167,6 +167,39 @@ public sealed class DatabaseRestoreServiceTests
         Assert.That(path, Is.EqualTo(Path.Combine(absolute, taskId.ToString("N"))));
     }
 
+    [Test]
+    public void BuildTempRoot_NullTempPath_UsesBaseDirectoryTempSubfolder()
+    {
+        var root = DatabaseRestoreService.BuildTempRoot(null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Path.IsPathRooted(root), Is.True);
+            Assert.That(root, Does.StartWith(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory)));
+            Assert.That(root, Does.EndWith("temp"));
+        });
+    }
+
+    [Test]
+    public void BuildTempRoot_AbsoluteTempPath_UsedAsIs()
+    {
+        var absolute = Path.Combine(Path.GetTempPath(), "restore-abs-root");
+
+        var root = DatabaseRestoreService.BuildTempRoot(absolute);
+
+        Assert.That(root, Is.EqualTo(Path.GetFullPath(absolute)));
+    }
+
+    [Test]
+    public void BuildTempRoot_AndBuildTempDir_Agree()
+    {
+        var taskId = Guid.NewGuid();
+        var root = DatabaseRestoreService.BuildTempRoot("my-restore");
+        var dir = DatabaseRestoreService.BuildTempDir("my-restore", taskId);
+
+        Assert.That(dir, Is.EqualTo(Path.Combine(root, taskId.ToString("N"))));
+    }
+
     // ---------- IsKnownMssqlPermissionCode ----------
 
     [TestCase(229)]

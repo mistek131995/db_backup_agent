@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using BackupsterAgent.Contracts;
 using BackupsterAgent.Settings;
@@ -12,6 +13,7 @@ public sealed class ScheduleService
 {
     private readonly HttpClient _http;
     private readonly AgentSettings _settings;
+    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<ScheduleService> _logger;
     private readonly ResiliencePipeline _pipeline;
 
@@ -33,10 +35,12 @@ public sealed class ScheduleService
     public ScheduleService(
         HttpClient http,
         IOptions<AgentSettings> settings,
+        IDashboardAuthGuard authGuard,
         ILogger<ScheduleService> logger)
     {
         _http = http;
         _settings = settings.Value;
+        _authGuard = authGuard;
         _logger = logger;
         _pipeline = BuildPipeline();
     }
@@ -75,6 +79,11 @@ public sealed class ScheduleService
                 request.Headers.Add("X-Agent-Token", _settings.Token);
 
                 var response = await _http.SendAsync(request, innerCt);
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    _authGuard.OnUnauthorized($"{nameof(ScheduleService)}.{nameof(RefreshScheduleAsync)}", _logger);
+                    throw new DashboardUnauthorizedException($"{nameof(ScheduleService)}.{nameof(RefreshScheduleAsync)}");
+                }
                 response.EnsureSuccessStatusCode();
                 fetched = await response.Content.ReadFromJsonAsync<ScheduleDto>(innerCt);
             }, ct);
@@ -154,6 +163,8 @@ public sealed class ScheduleService
             .AddRetry(new RetryStrategyOptions
             {
                 MaxRetryAttempts = 3,
+                ShouldHandle = args => ValueTask.FromResult(
+                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
                 DelayGenerator = args =>
                 {
                     var delay = args.AttemptNumber < RetryDelays.Length

@@ -167,7 +167,13 @@ public sealed class ConnectionSyncServiceTests
             DashboardUrl = dashboardUrl,
         });
         return new ConnectionSyncService(http, resolver, settings,
+            new NullAuthGuard(),
             NullLogger<ConnectionSyncService>.Instance);
+    }
+
+    private sealed class NullAuthGuard : IDashboardAuthGuard
+    {
+        public void OnUnauthorized(string channel, Microsoft.Extensions.Logging.ILogger logger) { }
     }
 
     private sealed class CapturingHandler : HttpMessageHandler

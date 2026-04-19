@@ -32,24 +32,39 @@ public sealed class SftpUploadService : IUploadService
 
         using var client = BuildClient();
 
-        await Task.Run(() =>
+        try
         {
-            client.Connect();
+            await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                client.Connect();
 
-            EnsureRemoteDirectory(client, remoteDir);
+                using var reg = ct.Register(() =>
+                {
+                    try { client.Disconnect(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "SFTP disconnect on cancel failed (best-effort)"); }
+                });
 
-            using var fileStream = new FileStream(
-                filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 65536);
+                EnsureRemoteDirectory(client, remoteDir, ct);
 
-            Action<ulong>? callback = progress is null
-                ? null
-                : uploaded => progress.Report((long)uploaded);
+                using var fileStream = new FileStream(
+                    filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 65536);
 
-            client.UploadFile(fileStream, remotePath, canOverride: true, uploadCallback: callback);
+                Action<ulong>? callback = progress is null
+                    ? null
+                    : uploaded => progress.Report((long)uploaded);
 
-            client.Disconnect();
-        }, ct);
+                client.UploadFile(fileStream, remotePath, canOverride: true, uploadCallback: callback);
+
+                ct.ThrowIfCancellationRequested();
+                client.Disconnect();
+            }, ct);
+        }
+        catch (Exception ex) when (ct.IsCancellationRequested && ex is not OperationCanceledException)
+        {
+            throw new OperationCanceledException("SFTP upload cancelled by stoppingToken.", ex, ct);
+        }
 
         var storagePath = $"sftp://{_settings.Host}{remotePath}";
         _logger.LogInformation("SFTP upload completed. StoragePath: '{StoragePath}'", storagePath);
@@ -127,13 +142,14 @@ public sealed class SftpUploadService : IUploadService
         e.CanTrust = true;
     }
 
-    private static void EnsureRemoteDirectory(SftpClient client, string remoteDir)
+    private static void EnsureRemoteDirectory(SftpClient client, string remoteDir, CancellationToken ct)
     {
         var parts = remoteDir.TrimStart('/').Split('/');
         var current = string.Empty;
 
         foreach (var part in parts)
         {
+            ct.ThrowIfCancellationRequested();
             current += "/" + part;
             if (!client.Exists(current))
                 client.CreateDirectory(current);

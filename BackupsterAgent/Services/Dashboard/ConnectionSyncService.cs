@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,6 +22,7 @@ public sealed class ConnectionSyncService : IConnectionSyncService
     private readonly HttpClient _http;
     private readonly ConnectionResolver _connections;
     private readonly AgentSettings _settings;
+    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<ConnectionSyncService> _logger;
     private readonly ResiliencePipeline _pipeline;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -36,11 +38,13 @@ public sealed class ConnectionSyncService : IConnectionSyncService
         HttpClient http,
         ConnectionResolver connections,
         IOptions<AgentSettings> settings,
+        IDashboardAuthGuard authGuard,
         ILogger<ConnectionSyncService> logger)
     {
         _http = http;
         _connections = connections;
         _settings = settings.Value;
+        _authGuard = authGuard;
         _logger = logger;
         _pipeline = BuildPipeline();
     }
@@ -82,6 +86,11 @@ public sealed class ConnectionSyncService : IConnectionSyncService
                     request.Content = JsonContent.Create(payload, options: JsonOptions);
 
                     var response = await _http.SendAsync(request, innerCt);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        _authGuard.OnUnauthorized($"{nameof(ConnectionSyncService)}.{nameof(SyncAsync)}", _logger);
+                        throw new DashboardUnauthorizedException($"{nameof(ConnectionSyncService)}.{nameof(SyncAsync)}");
+                    }
                     response.EnsureSuccessStatusCode();
                 }, ct);
 
@@ -144,6 +153,8 @@ public sealed class ConnectionSyncService : IConnectionSyncService
             .AddRetry(new RetryStrategyOptions
             {
                 MaxRetryAttempts = 3,
+                ShouldHandle = args => ValueTask.FromResult(
+                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
                 DelayGenerator = args =>
                 {
                     var delay = args.AttemptNumber < RetryDelays.Length

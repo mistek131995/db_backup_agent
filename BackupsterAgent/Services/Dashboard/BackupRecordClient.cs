@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -26,16 +27,19 @@ public sealed class BackupRecordClient : IBackupRecordClient
 
     private readonly HttpClient _http;
     private readonly AgentSettings _settings;
+    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<BackupRecordClient> _logger;
     private readonly ResiliencePipeline _retryPipeline;
 
     public BackupRecordClient(
         HttpClient http,
         IOptions<AgentSettings> settings,
+        IDashboardAuthGuard authGuard,
         ILogger<BackupRecordClient> logger)
     {
         _http = http;
         _settings = settings.Value;
+        _authGuard = authGuard;
         _logger = logger;
         _retryPipeline = BuildRetryPipeline();
     }
@@ -55,6 +59,7 @@ public sealed class BackupRecordClient : IBackupRecordClient
                 request.Content = JsonContent.Create(dto, options: JsonOptions);
 
                 var resp = await _http.SendAsync(request, innerCt);
+                ThrowIfUnauthorized(resp, nameof(OpenAsync));
                 resp.EnsureSuccessStatusCode();
                 return resp;
             }, ct);
@@ -99,6 +104,7 @@ public sealed class BackupRecordClient : IBackupRecordClient
         request.Content = JsonContent.Create(progress, options: JsonOptions);
 
         using var response = await _http.SendAsync(request, timeoutCts.Token);
+        ThrowIfUnauthorized(response, nameof(ReportProgressAsync));
         response.EnsureSuccessStatusCode();
     }
 
@@ -117,6 +123,7 @@ public sealed class BackupRecordClient : IBackupRecordClient
                 request.Content = JsonContent.Create(dto, options: JsonOptions);
 
                 using var response = await _http.SendAsync(request, innerCt);
+                ThrowIfUnauthorized(response, nameof(FinalizeAsync));
                 response.EnsureSuccessStatusCode();
             }, ct);
 
@@ -142,11 +149,20 @@ public sealed class BackupRecordClient : IBackupRecordClient
         return false;
     }
 
+    private void ThrowIfUnauthorized(HttpResponseMessage response, string channel)
+    {
+        if (response.StatusCode != HttpStatusCode.Unauthorized) return;
+        _authGuard.OnUnauthorized($"{nameof(BackupRecordClient)}.{channel}", _logger);
+        throw new DashboardUnauthorizedException($"{nameof(BackupRecordClient)}.{channel}");
+    }
+
     private ResiliencePipeline BuildRetryPipeline() =>
         new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
             {
                 MaxRetryAttempts = 3,
+                ShouldHandle = args => ValueTask.FromResult(
+                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
                 DelayGenerator = args =>
                 {
                     var delay = args.AttemptNumber < RetryDelays.Length

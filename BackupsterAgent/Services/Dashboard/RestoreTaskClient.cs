@@ -27,16 +27,19 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
 
     private readonly HttpClient _http;
     private readonly AgentSettings _settings;
+    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<RestoreTaskClient> _logger;
     private readonly ResiliencePipeline _patchPipeline;
 
     public RestoreTaskClient(
         HttpClient http,
         IOptions<AgentSettings> settings,
+        IDashboardAuthGuard authGuard,
         ILogger<RestoreTaskClient> logger)
     {
         _http = http;
         _settings = settings.Value;
+        _authGuard = authGuard;
         _logger = logger;
         _patchPipeline = BuildPatchPipeline();
     }
@@ -54,6 +57,12 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
 
         if (response.StatusCode == HttpStatusCode.NoContent)
             return null;
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _authGuard.OnUnauthorized($"{nameof(RestoreTaskClient)}.{nameof(FetchTaskAsync)}", _logger);
+            throw new DashboardUnauthorizedException($"{nameof(RestoreTaskClient)}.{nameof(FetchTaskAsync)}");
+        }
 
         response.EnsureSuccessStatusCode();
 
@@ -84,6 +93,11 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
             request.Content = JsonContent.Create(patch, options: JsonOptions);
 
             using var response = await _http.SendAsync(request, innerCt);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                _authGuard.OnUnauthorized($"{nameof(RestoreTaskClient)}.{nameof(PatchTaskAsync)}", _logger);
+                throw new DashboardUnauthorizedException($"{nameof(RestoreTaskClient)}.{nameof(PatchTaskAsync)}");
+            }
             response.EnsureSuccessStatusCode();
         }, ct);
 
@@ -106,6 +120,11 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
         request.Content = JsonContent.Create(progress, options: JsonOptions);
 
         using var response = await _http.SendAsync(request, timeoutCts.Token);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _authGuard.OnUnauthorized($"{nameof(RestoreTaskClient)}.{nameof(ReportProgressAsync)}", _logger);
+            throw new DashboardUnauthorizedException($"{nameof(RestoreTaskClient)}.{nameof(ReportProgressAsync)}");
+        }
         response.EnsureSuccessStatusCode();
     }
 
@@ -124,6 +143,8 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
             .AddRetry(new RetryStrategyOptions
             {
                 MaxRetryAttempts = 3,
+                ShouldHandle = args => ValueTask.FromResult(
+                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
                 DelayGenerator = args =>
                 {
                     var delay = args.AttemptNumber < RetryDelays.Length
