@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Domain;
 using DbBackupAgent.Services;
@@ -45,10 +46,13 @@ public sealed class MssqlBackupProvider : IBackupProvider
                 "-S", serverAddress,
                 "-U", connection.Username,
                 "-P", connection.Password,
+                "-C",
                 "-Q", tsql
             },
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
         };

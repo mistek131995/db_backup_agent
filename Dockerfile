@@ -16,9 +16,6 @@ RUN dotnet publish ./DbBackupAgent/DbBackupAgent.csproj \
 # ── runtime stage ─────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/runtime:10.0 AS base
 
-# Install pg_dump (postgresql-client) for Postgres backups.
-# For MSSQL backups, add the Microsoft mssql-tools package:
-#   https://learn.microsoft.com/sql/linux/sql-server-linux-setup-tools
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release && \
     install -d /usr/share/postgresql-common/pgdg && \
@@ -26,9 +23,18 @@ RUN apt-get update && \
       -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list && \
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg && \
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+      > /etc/apt/sources.list.d/mssql-release.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client-17 && \
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
+      postgresql-client-17 \
+      default-mysql-client \
+      mssql-tools18 && \
     rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/mssql-tools18/bin:${PATH}"
 
 WORKDIR /app
 COPY --from=build /app/publish .

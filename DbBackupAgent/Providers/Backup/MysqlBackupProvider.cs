@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Text;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Domain;
 using Microsoft.Extensions.Logging;
@@ -47,6 +48,7 @@ public sealed class MysqlBackupProvider : IBackupProvider
             },
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
         };

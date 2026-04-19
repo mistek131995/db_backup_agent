@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Exceptions;
 using Microsoft.Extensions.Logging;
@@ -84,6 +85,8 @@ WHERE TABLE_SCHEMA = @db;";
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
         };

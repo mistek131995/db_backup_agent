@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using DbBackupAgent.Configuration;
 using DbBackupAgent.Exceptions;
 using DbBackupAgent.Services;
@@ -91,6 +92,8 @@ FROM pg_roles WHERE rolname = current_user;";
             },
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
