@@ -3,12 +3,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 
 # Restore is cached separately from the rest of the source
-COPY DbBackupAgent/DbBackupAgent.csproj ./DbBackupAgent/
-RUN dotnet restore ./DbBackupAgent/DbBackupAgent.csproj
+COPY BackupsterAgent/BackupsterAgent.csproj ./BackupsterAgent/
+RUN dotnet restore ./BackupsterAgent/BackupsterAgent.csproj
 
-COPY DbBackupAgent/ ./DbBackupAgent/
+COPY BackupsterAgent/ ./BackupsterAgent/
 COPY appsettings.json ./
-RUN dotnet publish ./DbBackupAgent/DbBackupAgent.csproj \
+RUN dotnet publish ./BackupsterAgent/BackupsterAgent.csproj \
       -c Release \
       -o /app/publish \
       --no-restore
@@ -42,4 +42,4 @@ COPY --from=build /app/publish .
 # Default output directory; override via BackupSettings:OutputPath or a bind-mount
 VOLUME ["/backups"]
 
-ENTRYPOINT ["dotnet", "DbBackupAgent.dll"]
+ENTRYPOINT ["dotnet", "BackupsterAgent.dll"]

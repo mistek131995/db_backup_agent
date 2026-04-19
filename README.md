@@ -1,4 +1,4 @@
-# DbBackupAgent
+# BackupsterAgent
 
 .NET 10 Worker Service для автоматического резервного копирования баз данных.
 
@@ -56,23 +56,23 @@ Poll task → Download → Decrypt → Restore DB → Restore Files → Report
 ### Docker
 
 ```bash
-docker run -d --name dbbackup-agent \
+docker run -d --name backupster-agent \
   -e AgentSettings__Token=<токен> \
   -e AgentSettings__DashboardUrl=<url дашборда> \
-  -v /root/dbbackup-agent:/app/config \
-  ghcr.io/mistek131995/db_backup_agent:latest
+  -v /root/backupster-agent:/app/config \
+  ghcr.io/mistek131995/backupster-agent:latest
 ```
 
 Если планируете использовать файловый бэкап (`FilePaths`), смонтируйте исходные директории в контейнер отдельными томами и пропишите их контейнерные пути в `FilePaths`:
 
 ```bash
-docker run -d --name dbbackup-agent \
+docker run -d --name backupster-agent \
   -e AgentSettings__Token=<токен> \
   -e AgentSettings__DashboardUrl=<url дашборда> \
-  -v /root/dbbackup-agent:/app/config \
+  -v /root/backupster-agent:/app/config \
   -v /var/app/uploads:/app/data/uploads \
   -v /etc/app:/app/data/config \
-  ghcr.io/mistek131995/db_backup_agent:latest
+  ghcr.io/mistek131995/backupster-agent:latest
 ```
 
 В `appsettings.json`: `"FilePaths": ["/app/data/uploads", "/app/data/config"]`.
@@ -80,23 +80,23 @@ docker run -d --name dbbackup-agent \
 При первом запуске агент создаст шаблон `/app/config/appsettings.json`. Заполните его и перезапустите контейнер:
 
 ```bash
-docker restart dbbackup-agent
+docker restart backupster-agent
 ```
 
 ### Linux (systemd)
 
 ```bash
-sudo mkdir -p /opt/dbbackup-agent
-# скопируйте опубликованные файлы в /opt/dbbackup-agent
+sudo mkdir -p /opt/backupster-agent
+# скопируйте опубликованные файлы в /opt/backupster-agent
 
-sudo tee /etc/systemd/system/dbbackup-agent.service <<EOF
+sudo tee /etc/systemd/system/backupster-agent.service <<EOF
 [Unit]
-Description=DbBackup Agent
+Description=Backupster Agent
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/dbbackup-agent
-ExecStart=/opt/dbbackup-agent/DbBackupAgent
+WorkingDirectory=/opt/backupster-agent
+ExecStart=/opt/backupster-agent/BackupsterAgent
 Environment=AgentSettings__Token=<токен>
 Environment=AgentSettings__DashboardUrl=<url дашборда>
 Restart=always
@@ -107,43 +107,43 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now dbbackup-agent
+sudo systemctl enable --now backupster-agent
 ```
 
 При первом запуске агент создаст шаблон `/app/config/appsettings.json`. Заполните его и перезапустите службу:
 
 ```bash
-sudo systemctl restart dbbackup-agent
+sudo systemctl restart backupster-agent
 ```
 
 ### Windows (служба)
 
 ```powershell
-# Распакуйте опубликованные файлы в C:\Services\DbBackupAgent
+# Распакуйте опубликованные файлы в C:\Services\BackupsterAgent
 
-sc.exe create DbBackupAgent binPath="C:\Services\DbBackupAgent\DbBackupAgent.exe"
+sc.exe create BackupsterAgent binPath="C:\Services\BackupsterAgent\BackupsterAgent.exe"
 
 # Задайте переменные окружения
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\DbBackupAgent\Environment" ^
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\BackupsterAgent\Environment" ^
   /v AgentSettings__Token /t REG_SZ /d "<токен>"
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\DbBackupAgent\Environment" ^
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\BackupsterAgent\Environment" ^
   /v AgentSettings__DashboardUrl /t REG_SZ /d "<url дашборда>"
 
-sc.exe start DbBackupAgent
+sc.exe start BackupsterAgent
 ```
 
-При первом запуске агент создаст шаблон `C:\Services\DbBackupAgent\config\appsettings.json`. Заполните его и перезапустите службу:
+При первом запуске агент создаст шаблон `C:\Services\BackupsterAgent\config\appsettings.json`. Заполните его и перезапустите службу:
 
 ```powershell
-sc.exe stop DbBackupAgent
-sc.exe start DbBackupAgent
+sc.exe stop BackupsterAgent
+sc.exe start BackupsterAgent
 ```
 
 ### Для разработки
 
 ```bash
-cd DbBackupAgent
-dotnet run --project DbBackupAgent/DbBackupAgent.csproj
+cd BackupsterAgent
+dotnet run --project BackupsterAgent/BackupsterAgent.csproj
 ```
 
 ---

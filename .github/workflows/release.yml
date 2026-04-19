@@ -23,7 +23,7 @@ jobs:
 
       - name: Publish self-contained (${{ matrix.rid }})
         run: |
-          dotnet publish DbBackupAgent/DbBackupAgent.csproj \
+          dotnet publish BackupsterAgent/BackupsterAgent.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
             --self-contained true \
@@ -33,13 +33,13 @@ jobs:
       - name: Create archive
         run: |
           cd publish/${{ matrix.rid }}
-          zip -r ../../DbBackupAgent-${{ github.ref_name }}-${{ matrix.rid }}.zip .
+          zip -r ../../BackupsterAgent-${{ github.ref_name }}-${{ matrix.rid }}.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DbBackupAgent-${{ matrix.rid }}
-          path: DbBackupAgent-${{ github.ref_name }}-${{ matrix.rid }}.zip
+          name: BackupsterAgent-${{ matrix.rid }}
+          path: BackupsterAgent-${{ github.ref_name }}-${{ matrix.rid }}.zip
 
   # ── Docker image → ghcr.io ───────────────────────────────────────────────────
   docker:
@@ -61,10 +61,11 @@ jobs:
       - name: Determine tags
         id: tags
         run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/backupster-agent"
           if [[ "${{ github.ref_name }}" == *e ]]; then
-            echo "tags=ghcr.io/${{ github.repository }}:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "tags=${IMAGE}:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           else
-            printf "tags<<EOF\nghcr.io/${{ github.repository }}:${{ github.ref_name }}\nghcr.io/${{ github.repository }}:latest\nEOF\n" >> "$GITHUB_OUTPUT"
+            printf "tags<<EOF\n${IMAGE}:${{ github.ref_name }}\n${IMAGE}:latest\nEOF\n" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push image
