@@ -67,6 +67,12 @@ public sealed class ScheduleService
 
     private async Task RefreshScheduleAsync(CancellationToken ct)
     {
+        if (!IsConfigured())
+        {
+            _lastFetchAt = DateTime.UtcNow;
+            return;
+        }
+
         try
         {
             ScheduleDto? fetched = null;
@@ -101,6 +107,16 @@ public sealed class ScheduleService
             _logger.LogWarning(ex,
                 "ScheduleService: failed to fetch schedule from server. Using last known schedule.");
         }
+    }
+
+    private bool IsConfigured()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.Token) && !string.IsNullOrWhiteSpace(_settings.DashboardUrl))
+            return true;
+
+        _logger.LogWarning(
+            "ScheduleService: AgentSettings.Token or DashboardUrl is not configured. Schedule fetching is disabled.");
+        return false;
     }
 
     private void LogCronChanges(ScheduleDto fetched)
