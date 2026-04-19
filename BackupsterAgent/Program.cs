@@ -45,6 +45,9 @@ builder.Services.Configure<AgentSettings>(
 builder.Services.Configure<RestoreSettings>(
     builder.Configuration.GetSection("RestoreSettings"));
 
+builder.Services.Configure<GcSettings>(
+    builder.Configuration.GetSection("GcSettings"));
+
 builder.Services.AddSingleton<PostgresBackupProvider>();
 builder.Services.AddSingleton<MssqlBackupProvider>();
 builder.Services.AddSingleton<MysqlBackupProvider>();
@@ -85,10 +88,12 @@ builder.Services.AddHttpClient<IRestoreTaskClient, RestoreTaskClient>(
 builder.Services.AddSingleton<IProgressReporterFactory, ProgressReporterFactory>();
 builder.Services.AddSingleton<DatabaseRestoreService>();
 builder.Services.AddSingleton<FileRestoreService>();
+builder.Services.AddSingleton<ChunkGcService>();
 builder.Services.AddSingleton<BackupJob>();
 builder.Services.AddHostedService<BackupWorker>();
 builder.Services.AddHostedService<ConnectionSyncWorker>();
 builder.Services.AddHostedService<RestoreTaskPollingService>();
+builder.Services.AddHostedService<ChunkGcWorker>();
 
 var host = builder.Build();
 host.Run();

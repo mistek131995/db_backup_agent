@@ -146,25 +146,42 @@ SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260)) AS DataP
         var sb = new StringBuilder();
         var dataIndex = 0;
         var logIndex = 0;
+        var fsIndex = 0;
+        var ftIndex = 0;
 
         foreach (var (logical, type) in fileList)
         {
             string newPath;
-            if (type == "D")
+            switch (type)
             {
-                var suffix = dataIndex == 0 ? string.Empty : $"_{dataIndex}";
-                newPath = CombineSqlPath(dataPath, $"{targetDatabase}{suffix}.mdf");
-                dataIndex++;
-            }
-            else if (type == "L")
-            {
-                var suffix = logIndex == 0 ? string.Empty : $"_{logIndex}";
-                newPath = CombineSqlPath(logPath, $"{targetDatabase}{suffix}.ldf");
-                logIndex++;
-            }
-            else
-            {
-                continue;
+                case "D":
+                {
+                    var suffix = dataIndex == 0 ? string.Empty : $"_{dataIndex}";
+                    newPath = CombineSqlPath(dataPath, $"{targetDatabase}{suffix}.mdf");
+                    dataIndex++;
+                    break;
+                }
+                case "L":
+                {
+                    var suffix = logIndex == 0 ? string.Empty : $"_{logIndex}";
+                    newPath = CombineSqlPath(logPath, $"{targetDatabase}{suffix}.ldf");
+                    logIndex++;
+                    break;
+                }
+                case "S":
+                {
+                    newPath = CombineSqlPath(dataPath, $"{targetDatabase}_FS_{fsIndex}");
+                    fsIndex++;
+                    break;
+                }
+                case "F":
+                {
+                    newPath = CombineSqlPath(dataPath, $"{targetDatabase}_FT_{ftIndex}");
+                    ftIndex++;
+                    break;
+                }
+                default:
+                    continue;
             }
 
             var escapedLogical = logical.Replace("'", "''");

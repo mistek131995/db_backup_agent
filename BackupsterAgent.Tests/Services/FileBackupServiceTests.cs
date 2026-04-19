@@ -239,5 +239,11 @@ public sealed class FileBackupServiceTests
 
         public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
             throw new NotSupportedException("FileBackupService must not call DownloadBytesAsync");
+
+        public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
+            throw new NotSupportedException("FileBackupService must not call ListAsync");
+
+        public Task DeleteAsync(string objectKey, CancellationToken ct) =>
+            throw new NotSupportedException("FileBackupService must not call DeleteAsync");
     }
 }

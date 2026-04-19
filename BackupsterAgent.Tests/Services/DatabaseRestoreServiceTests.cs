@@ -509,5 +509,11 @@ public sealed class DatabaseRestoreServiceTests
 
         public Task<bool> ExistsAsync(string objectKey, CancellationToken ct) =>
             throw new NotSupportedException();
+
+        public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task DeleteAsync(string objectKey, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 }

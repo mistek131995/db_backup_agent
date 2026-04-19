@@ -520,5 +520,11 @@ public sealed class FileRestoreServiceTests
 
         public Task DownloadAsync(string objectKey, string localPath, IProgress<long>? progress, CancellationToken ct) =>
             throw new NotSupportedException("FileRestoreService must not call DownloadAsync");
+
+        public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
+            throw new NotSupportedException("FileRestoreService must not call ListAsync");
+
+        public Task DeleteAsync(string objectKey, CancellationToken ct) =>
+            throw new NotSupportedException("FileRestoreService must not call DeleteAsync");
     }
 }

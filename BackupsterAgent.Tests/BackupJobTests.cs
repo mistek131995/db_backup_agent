@@ -209,6 +209,12 @@ public sealed class BackupJobTests
 
         public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
             throw new NotSupportedException("BackupJob must not call DownloadBytesAsync");
+
+        public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
+            throw new NotSupportedException("BackupJob must not call ListAsync");
+
+        public Task DeleteAsync(string objectKey, CancellationToken ct) =>
+            throw new NotSupportedException("BackupJob must not call DeleteAsync");
     }
 
     private sealed class StubUploadServiceFactory(IUploadService service) : IUploadServiceFactory

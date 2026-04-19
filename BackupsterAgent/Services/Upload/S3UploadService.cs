@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Amazon.S3;
 using Amazon.S3.Model;
 using BackupsterAgent.Settings;
@@ -188,6 +189,46 @@ public sealed class S3UploadService : IUploadService, IDisposable
             await response.ResponseStream.CopyToAsync(memory, ct);
             return memory.ToArray();
         }
+    }
+
+    public async IAsyncEnumerable<StorageObject> ListAsync(
+        string prefix,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var client = GetClient();
+        string? continuationToken = null;
+
+        do
+        {
+            var request = new ListObjectsV2Request
+            {
+                BucketName = _settings.BucketName,
+                Prefix = prefix,
+                ContinuationToken = continuationToken,
+            };
+
+            var response = await client.ListObjectsV2Async(request, ct);
+
+            if (response.S3Objects is not null)
+            {
+                foreach (var obj in response.S3Objects)
+                {
+                    var lastModified = obj.LastModified is { } lm
+                        ? DateTime.SpecifyKind(lm, DateTimeKind.Utc)
+                        : DateTime.UtcNow;
+                    yield return new StorageObject(obj.Key, lastModified, obj.Size ?? 0);
+                }
+            }
+
+            continuationToken = (response.IsTruncated ?? false) ? response.NextContinuationToken : null;
+        }
+        while (continuationToken is not null);
+    }
+
+    public async Task DeleteAsync(string objectKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+        await GetClient().DeleteObjectAsync(_settings.BucketName, objectKey, ct);
     }
 
     public void Dispose() => _client?.Dispose();

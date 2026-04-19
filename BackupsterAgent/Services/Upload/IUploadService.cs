@@ -18,4 +18,8 @@ public interface IUploadService
     Task DownloadAsync(string objectKey, string localPath, IProgress<long>? progress, CancellationToken ct);
 
     Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct);
+
+    IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct);
+
+    Task DeleteAsync(string objectKey, CancellationToken ct);
 }

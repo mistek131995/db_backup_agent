@@ -84,6 +84,12 @@ public sealed class SftpUploadService : IUploadService
     public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
         throw new NotSupportedException("DownloadBytesAsync is not supported for SFTP provider. Restore requires S3.");
 
+    public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
+        throw new NotSupportedException("ListAsync is not supported for SFTP provider. Chunk GC requires S3.");
+
+    public Task DeleteAsync(string objectKey, CancellationToken ct) =>
+        throw new NotSupportedException("DeleteAsync is not supported for SFTP provider. Chunk GC requires S3.");
+
     private SftpClient BuildClient()
     {
         var host = _settings.Host;
