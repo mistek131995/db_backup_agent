@@ -73,10 +73,14 @@ builder.Services.AddSingleton<ContentDefinedChunker>();
 builder.Services.AddSingleton<FileBackupService>();
 builder.Services.AddSingleton<ManifestStore>();
 builder.Services.AddSingleton<IUploadServiceFactory, UploadServiceFactory>();
-builder.Services.AddHttpClient<IBackupRecordClient, BackupRecordClient>();
-builder.Services.AddHttpClient<ScheduleService>();
-builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>();
-builder.Services.AddHttpClient<IRestoreTaskClient, RestoreTaskClient>();
+builder.Services.AddHttpClient<IBackupRecordClient, BackupRecordClient>(
+    c => c.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHttpClient<ScheduleService>(
+    c => c.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>(
+    c => c.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHttpClient<IRestoreTaskClient, RestoreTaskClient>(
+    c => c.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddSingleton<IProgressReporterFactory, ProgressReporterFactory>();
 builder.Services.AddSingleton<DatabaseRestoreService>();
 builder.Services.AddSingleton<FileRestoreService>();

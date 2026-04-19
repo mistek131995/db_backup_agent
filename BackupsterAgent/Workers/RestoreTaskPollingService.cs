@@ -109,6 +109,19 @@ public sealed class RestoreTaskPollingService : BackgroundService
             "RestoreTaskPollingService: executing task {TaskId} (source '{Source}')",
             task.TaskId, task.SourceDatabaseName);
 
+        if (ValidateTaskNames(task) is { } validationError)
+        {
+            _logger.LogWarning(
+                "RestoreTaskPollingService: task {TaskId} rejected by name validation: {Reason}",
+                task.TaskId, validationError);
+            return new PatchRestoreTaskDto
+            {
+                Status = RestoreTaskStatus.Failed,
+                DatabaseStatus = RestoreDatabaseStatus.Failed,
+                ErrorMessage = validationError,
+            };
+        }
+
         await using var reporter = _reporterFactory.CreateForRestore(task.TaskId);
 
         IUploadService uploader;
@@ -134,6 +147,20 @@ public sealed class RestoreTaskPollingService : BackgroundService
             : await _fileRestore.RunAsync(task.ManifestKey, task.TargetFileRoot, uploader, reporter, ct);
 
         return CombineResults(dbResult, fileResult);
+    }
+
+    internal static string? ValidateTaskNames(RestoreTaskForAgentDto task)
+    {
+        if (!DatabaseNameValidator.IsValid(task.SourceDatabaseName, out var sourceReason))
+            return $"Имя исходной БД не прошло валидацию: {sourceReason}.";
+
+        if (!string.IsNullOrEmpty(task.TargetDatabaseName)
+            && !DatabaseNameValidator.IsValid(task.TargetDatabaseName, out var targetReason))
+        {
+            return $"Имя целевой БД не прошло валидацию: {targetReason}.";
+        }
+
+        return null;
     }
 
     internal IUploadService ResolveUploader(RestoreTaskForAgentDto task)

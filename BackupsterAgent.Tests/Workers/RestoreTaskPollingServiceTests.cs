@@ -1,3 +1,4 @@
+using BackupsterAgent.Contracts;
 using BackupsterAgent.Domain;
 using BackupsterAgent.Enums;
 using BackupsterAgent.Workers;
@@ -135,5 +136,63 @@ public sealed class RestoreTaskPollingServiceTests
             FileRestoreResult.Success(1));
 
         Assert.That(patch.ErrorMessage, Is.EqualTo("only-db"));
+    }
+
+    [Test]
+    public void ValidateTaskNames_ValidSourceOnly_ReturnsNull()
+    {
+        var task = new RestoreTaskForAgentDto { SourceDatabaseName = "mydb" };
+        Assert.That(RestoreTaskPollingService.ValidateTaskNames(task), Is.Null);
+    }
+
+    [Test]
+    public void ValidateTaskNames_ValidSourceAndTarget_ReturnsNull()
+    {
+        var task = new RestoreTaskForAgentDto
+        {
+            SourceDatabaseName = "mydb",
+            TargetDatabaseName = "mydb_restore",
+        };
+        Assert.That(RestoreTaskPollingService.ValidateTaskNames(task), Is.Null);
+    }
+
+    [Test]
+    public void ValidateTaskNames_EmptySource_ReturnsError()
+    {
+        var task = new RestoreTaskForAgentDto { SourceDatabaseName = "" };
+        var error = RestoreTaskPollingService.ValidateTaskNames(task);
+        Assert.That(error, Does.Contain("исходной БД"));
+    }
+
+    [Test]
+    public void ValidateTaskNames_BadCharInSource_ReturnsError()
+    {
+        var task = new RestoreTaskForAgentDto { SourceDatabaseName = "foo'; DROP" };
+        var error = RestoreTaskPollingService.ValidateTaskNames(task);
+        Assert.That(error, Does.Contain("исходной БД"));
+        Assert.That(error, Does.Contain("недопустимый символ"));
+    }
+
+    [Test]
+    public void ValidateTaskNames_BadCharInTarget_ReturnsError()
+    {
+        var task = new RestoreTaskForAgentDto
+        {
+            SourceDatabaseName = "mydb",
+            TargetDatabaseName = "../etc/passwd",
+        };
+        var error = RestoreTaskPollingService.ValidateTaskNames(task);
+        Assert.That(error, Does.Contain("целевой БД"));
+    }
+
+    [Test]
+    public void ValidateTaskNames_NullTarget_IgnoredAsOptional()
+    {
+        var task = new RestoreTaskForAgentDto
+        {
+            SourceDatabaseName = "mydb",
+            TargetDatabaseName = null,
+        };
+        Assert.That(RestoreTaskPollingService.ValidateTaskNames(task), Is.Null);
     }
 }

@@ -25,6 +25,7 @@ public sealed class FileRestoreServiceTests
     };
 
     private string _tempRoot = null!;
+    private string _landingDir = null!;
     private byte[] _key = null!;
     private EncryptionService _encryption = null!;
     private FakeUploadService _upload = null!;
@@ -35,6 +36,7 @@ public sealed class FileRestoreServiceTests
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), "dbbackup-file-restore-tests-" + Path.GetRandomFileName());
         Directory.CreateDirectory(_tempRoot);
+        _landingDir = Path.Combine(_tempRoot, "landing");
 
         _key = RandomNumberGenerator.GetBytes(32);
         _encryption = new EncryptionService(
@@ -42,7 +44,10 @@ public sealed class FileRestoreServiceTests
             NullLogger<EncryptionService>.Instance);
 
         _upload = new FakeUploadService();
-        _service = new FileRestoreService(_encryption, NullLogger<FileRestoreService>.Instance);
+        _service = new FileRestoreService(
+            _encryption,
+            Options.Create(new RestoreSettings { FileRestoreBasePath = _landingDir }),
+            NullLogger<FileRestoreService>.Instance);
     }
 
     [TearDown]
@@ -172,7 +177,7 @@ public sealed class FileRestoreServiceTests
     }
 
     [Test]
-    public async Task RunAsync_WindowsDriveLetterInEntryPath_PlacesUnderTargetRootAsRelative()
+    public async Task RunAsync_WindowsDriveLetterInEntryPath_RejectedAsUnsafe()
     {
         var content = RandomNumberGenerator.GetBytes(50);
         var sha = StoreChunk(content);
@@ -181,13 +186,16 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
-        var expected = Path.Combine(_tempRoot, "C", "data", "file.txt");
-        Assert.That(File.Exists(expected), Is.True, $"expected file at {expected}");
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
+            Assert.That(result.FilesFailedCount, Is.EqualTo(1));
+            Assert.That(result.ErrorMessage, Does.Contain("буквой диска"));
+        });
     }
 
     [Test]
-    public async Task RunAsync_UnixAbsoluteEntryPath_PlacesUnderTargetRootStrippingLeadingSlash()
+    public async Task RunAsync_UnixAbsoluteEntryPath_RejectedAsUnsafe()
     {
         var content = RandomNumberGenerator.GetBytes(50);
         var sha = StoreChunk(content);
@@ -196,9 +204,30 @@ public sealed class FileRestoreServiceTests
 
         var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
-        var expected = Path.Combine(_tempRoot, "var", "log", "app.log");
-        Assert.That(File.Exists(expected), Is.True, $"expected file at {expected}");
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
+            Assert.That(result.FilesFailedCount, Is.EqualTo(1));
+            Assert.That(result.ErrorMessage, Does.Contain("абсолютный путь"));
+        });
+    }
+
+    [Test]
+    public async Task RunAsync_ParentTraversalInEntryPath_RejectedAsUnsafe()
+    {
+        var content = RandomNumberGenerator.GetBytes(50);
+        var sha = StoreChunk(content);
+        var entry = new FileEntry("../../etc/passwd", content.Length, 0, SafeMode, [sha]);
+        StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
+
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Partial));
+            Assert.That(result.FilesFailedCount, Is.EqualTo(1));
+            Assert.That(result.ErrorMessage, Does.Contain("выходит за пределы"));
+        });
     }
 
     [Test]
@@ -217,19 +246,65 @@ public sealed class FileRestoreServiceTests
     }
 
     [Test]
-    public async Task RunAsync_NullTargetFileRoot_WritesToSourceAbsolutePathUnchanged()
+    public async Task RunAsync_NullTargetFileRoot_WritesToAgentLandingZone()
     {
         var content = RandomNumberGenerator.GetBytes(50);
         var sha = StoreChunk(content);
-        var target = Path.Combine(_tempRoot, "absolute-original.bin");
-        var entry = new FileEntry(target, content.Length, 0, SafeMode, [sha]);
+        var entry = new FileEntry("sub/file.bin", content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
         var result = await _service.RunAsync(ManifestKey, targetFileRoot: null, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
-        Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
-        Assert.That(File.Exists(target), Is.True);
-        Assert.That(await File.ReadAllBytesAsync(target), Is.EqualTo(content));
+        var expected = Path.Combine(_landingDir, "sub", "file.bin");
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
+            Assert.That(File.Exists(expected), Is.True, $"expected file at {expected}");
+        });
+        Assert.That(await File.ReadAllBytesAsync(expected), Is.EqualTo(content));
+    }
+
+    [Test]
+    public async Task RunAsync_NullTargetFileRoot_ClearsLandingZoneBeforeRestore()
+    {
+        Directory.CreateDirectory(_landingDir);
+        var stale = Path.Combine(_landingDir, "stale-from-previous.bin");
+        await File.WriteAllBytesAsync(stale, [1, 2, 3]);
+
+        var content = RandomNumberGenerator.GetBytes(20);
+        var sha = StoreChunk(content);
+        var entry = new FileEntry("fresh.bin", content.Length, 0, SafeMode, [sha]);
+        StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
+
+        var result = await _service.RunAsync(ManifestKey, targetFileRoot: null, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
+            Assert.That(File.Exists(stale), Is.False, "stale landing-zone files must be wiped before restore");
+            Assert.That(File.Exists(Path.Combine(_landingDir, "fresh.bin")), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task RunAsync_ExplicitTargetFileRoot_DoesNotClearTargetDir()
+    {
+        var keep = Path.Combine(_tempRoot, "user-kept.bin");
+        await File.WriteAllBytesAsync(keep, [7, 7, 7]);
+
+        var content = RandomNumberGenerator.GetBytes(20);
+        var sha = StoreChunk(content);
+        var entry = new FileEntry("restored.bin", content.Length, 0, SafeMode, [sha]);
+        StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
+
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
+            Assert.That(File.Exists(keep), Is.True, "explicit targetFileRoot must not be wiped");
+            Assert.That(File.Exists(Path.Combine(_tempRoot, "restored.bin")), Is.True);
+        });
     }
 
     [Test]

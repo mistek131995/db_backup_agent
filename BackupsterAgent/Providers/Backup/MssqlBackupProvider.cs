@@ -45,7 +45,6 @@ public sealed class MssqlBackupProvider : IBackupProvider
             {
                 "-S", serverAddress,
                 "-U", connection.Username,
-                "-P", connection.Password,
                 "-C",
                 "-Q", tsql
             },
@@ -56,6 +55,7 @@ public sealed class MssqlBackupProvider : IBackupProvider
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        psi.Environment["SQLCMDPASSWORD"] = connection.Password;
 
         var sw = Stopwatch.StartNew();
         using var process = new Process { StartInfo = psi };

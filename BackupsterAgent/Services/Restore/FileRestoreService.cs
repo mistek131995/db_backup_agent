@@ -5,6 +5,8 @@ using BackupsterAgent.Domain;
 using BackupsterAgent.Enums;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Upload;
+using BackupsterAgent.Settings;
+using Microsoft.Extensions.Options;
 
 namespace BackupsterAgent.Services.Restore;
 
@@ -19,13 +21,16 @@ public sealed class FileRestoreService
     };
 
     private readonly EncryptionService _encryption;
+    private readonly RestoreSettings _restoreSettings;
     private readonly ILogger<FileRestoreService> _logger;
 
     public FileRestoreService(
         EncryptionService encryption,
+        IOptions<RestoreSettings> restoreSettings,
         ILogger<FileRestoreService> logger)
     {
         _encryption = encryption;
+        _restoreSettings = restoreSettings.Value;
         _logger = logger;
     }
 
@@ -90,9 +95,36 @@ public sealed class FileRestoreService
             return FileRestoreResult.Success(0);
         }
 
+        string baseDir;
+        bool isAgentLandingZone;
+        try
+        {
+            (baseDir, isAgentLandingZone) = ResolveBaseDir(targetFileRoot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FileRestoreService: failed to resolve base directory");
+            return FileRestoreResult.Failed(
+                $"Не удалось определить папку для восстановления файлов: {ex.Message}");
+        }
+
+        if (isAgentLandingZone)
+        {
+            try
+            {
+                ResetDirectory(baseDir);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "FileRestoreService: failed to reset landing zone '{Base}'", baseDir);
+                return FileRestoreResult.Failed(
+                    $"Не удалось очистить служебную папку восстановления '{baseDir}': {ex.Message}");
+            }
+        }
+
         _logger.LogInformation(
-            "FileRestoreService: restoring {Count} file(s) from manifest '{ManifestKey}', targetRoot: '{Root}'",
-            manifest.Files.Count, manifestKey, targetFileRoot ?? "(absolute paths)");
+            "FileRestoreService: restoring {Count} file(s) from manifest '{ManifestKey}' into '{Base}' (landingZone={Landing})",
+            manifest.Files.Count, manifestKey, baseDir, isAgentLandingZone);
 
         var restored = 0;
         var failed = new List<(string Path, string Reason)>();
@@ -113,7 +145,7 @@ public sealed class FileRestoreService
 
             try
             {
-                await RestoreFileAsync(entry, targetFileRoot, uploader, ct);
+                await RestoreFileAsync(entry, baseDir, uploader, ct);
                 restored++;
             }
             catch (OperationCanceledException)
@@ -142,9 +174,9 @@ public sealed class FileRestoreService
         return FileRestoreResult.Partial(restored, failed.Count, message);
     }
 
-    private async Task RestoreFileAsync(FileEntry entry, string? targetFileRoot, IUploadService uploader, CancellationToken ct)
+    private async Task RestoreFileAsync(FileEntry entry, string baseDir, IUploadService uploader, CancellationToken ct)
     {
-        var targetPath = ResolveTargetPath(entry.Path, targetFileRoot);
+        var targetPath = ResolveTargetPathSafe(baseDir, entry.Path);
         var targetDir = Path.GetDirectoryName(targetPath);
         if (!string.IsNullOrEmpty(targetDir))
             Directory.CreateDirectory(targetDir);
@@ -185,28 +217,66 @@ public sealed class FileRestoreService
         }
     }
 
-    private static string ResolveTargetPath(string sourcePath, string? targetFileRoot)
+    private (string BaseDir, bool IsAgentLandingZone) ResolveBaseDir(string? targetFileRoot)
     {
-        if (string.IsNullOrWhiteSpace(targetFileRoot))
-            return sourcePath;
-
-        var relative = NormalizeForRelative(sourcePath);
-        return Path.Combine(targetFileRoot, relative);
-    }
-
-    private static string NormalizeForRelative(string absolutePath)
-    {
-        if (absolutePath.Length >= 2 && absolutePath[1] == ':')
+        if (!string.IsNullOrWhiteSpace(targetFileRoot))
         {
-            var drive = absolutePath[0];
-            var rest = absolutePath.Length > 2 ? absolutePath.Substring(2) : string.Empty;
-            rest = rest.TrimStart('\\', '/');
-            var head = drive + Path.DirectorySeparatorChar.ToString();
-            return head + rest.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+            var absolute = Path.GetFullPath(targetFileRoot);
+            return (absolute, false);
         }
 
-        var trimmed = absolutePath.TrimStart('/', '\\');
-        return trimmed.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+        var raw = string.IsNullOrWhiteSpace(_restoreSettings.FileRestoreBasePath)
+            ? "./restore-files"
+            : _restoreSettings.FileRestoreBasePath;
+
+        var defaultBase = Path.IsPathRooted(raw)
+            ? Path.GetFullPath(raw)
+            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, raw));
+
+        return (defaultBase, true);
+    }
+
+    private void ResetDirectory(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+        Directory.CreateDirectory(path);
+    }
+
+    internal static string ResolveTargetPathSafe(string baseDir, string entryPath)
+    {
+        if (string.IsNullOrWhiteSpace(entryPath))
+            throw new InvalidDataException("В манифесте пустой путь файла.");
+
+        if (entryPath.Contains('\0'))
+            throw new InvalidDataException("В манифесте путь содержит NUL-байт.");
+
+        var normalized = entryPath.Replace('\\', '/');
+
+        if (normalized.StartsWith('/'))
+            throw new InvalidDataException($"В манифесте абсолютный путь '{entryPath}' — ожидался относительный.");
+
+        if (normalized.Length >= 2 && normalized[1] == ':')
+            throw new InvalidDataException($"В манифесте путь с буквой диска '{entryPath}' — ожидался относительный.");
+
+        foreach (var segment in normalized.Split('/'))
+        {
+            if (segment == "..")
+                throw new InvalidDataException($"В манифесте путь выходит за пределы базовой папки: '{entryPath}'.");
+        }
+
+        var rel = normalized.Replace('/', Path.DirectorySeparatorChar);
+        var combined = Path.GetFullPath(Path.Combine(baseDir, rel));
+        var baseFull = Path.GetFullPath(baseDir);
+
+        var baseWithSep = baseFull.EndsWith(Path.DirectorySeparatorChar)
+            ? baseFull
+            : baseFull + Path.DirectorySeparatorChar;
+
+        if (!combined.StartsWith(baseWithSep, StringComparison.Ordinal) && combined != baseFull)
+            throw new InvalidDataException($"Путь '{entryPath}' резолвится за пределы '{baseDir}'.");
+
+        return combined;
     }
 
     private void ApplyMetadata(string path, FileEntry entry)
