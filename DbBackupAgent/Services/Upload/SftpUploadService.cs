@@ -1,5 +1,4 @@
 using DbBackupAgent.Settings;
-using Microsoft.Extensions.Options;
 using Renci.SshNet;
 
 namespace DbBackupAgent.Services.Upload;
@@ -9,9 +8,9 @@ public sealed class SftpUploadService : IUploadService
     private readonly SftpSettings _settings;
     private readonly ILogger<SftpUploadService> _logger;
 
-    public SftpUploadService(IOptions<SftpSettings> settings, ILogger<SftpUploadService> logger)
+    public SftpUploadService(SftpSettings settings, ILogger<SftpUploadService> logger)
     {
-        _settings = settings.Value;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -27,7 +26,6 @@ public sealed class SftpUploadService : IUploadService
 
         using var client = BuildClient();
 
-        // SSH.NET is synchronous — run on thread pool to avoid blocking the async pipeline
         await Task.Run(() =>
         {
             client.Connect();
@@ -65,8 +63,6 @@ public sealed class SftpUploadService : IUploadService
     public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
         throw new NotSupportedException("DownloadBytesAsync is not supported for SFTP provider. Restore requires S3.");
 
-    // -------------------------------------------------------------------------
-
     private SftpClient BuildClient()
     {
         var host = _settings.Host;
@@ -75,7 +71,6 @@ public sealed class SftpUploadService : IUploadService
 
         if (!string.IsNullOrWhiteSpace(_settings.PrivateKeyPath))
         {
-            // Key-based authentication
             PrivateKeyFile keyFile = string.IsNullOrWhiteSpace(_settings.PrivateKeyPassphrase)
                 ? new PrivateKeyFile(_settings.PrivateKeyPath)
                 : new PrivateKeyFile(_settings.PrivateKeyPath, _settings.PrivateKeyPassphrase);
@@ -84,12 +79,10 @@ public sealed class SftpUploadService : IUploadService
             return new SftpClient(host, port, username, keyFile);
         }
 
-        // Password authentication
         _logger.LogDebug("SFTP using password auth for {Username}@{Host}:{Port}", username, host, port);
         return new SftpClient(host, port, username, _settings.Password);
     }
 
-    /// <summary>Creates the full remote directory path recursively if it doesn't exist.</summary>
     private static void EnsureRemoteDirectory(SftpClient client, string remoteDir)
     {
         var parts = remoteDir.TrimStart('/').Split('/');

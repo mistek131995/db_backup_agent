@@ -23,7 +23,6 @@ public sealed class DatabaseRestoreService
     private readonly ConnectionResolver _connections;
     private readonly IRestoreProviderFactory _restoreFactory;
     private readonly EncryptionService _encryption;
-    private readonly IUploadService _upload;
     private readonly RestoreSettings _restoreSettings;
     private readonly List<DatabaseConfig> _databases;
     private readonly ILogger<DatabaseRestoreService> _logger;
@@ -32,7 +31,6 @@ public sealed class DatabaseRestoreService
         ConnectionResolver connections,
         IRestoreProviderFactory restoreFactory,
         EncryptionService encryption,
-        IUploadService upload,
         IOptions<RestoreSettings> restoreSettings,
         IOptions<List<DatabaseConfig>> databases,
         ILogger<DatabaseRestoreService> logger)
@@ -40,7 +38,6 @@ public sealed class DatabaseRestoreService
         _connections = connections;
         _restoreFactory = restoreFactory;
         _encryption = encryption;
-        _upload = upload;
         _restoreSettings = restoreSettings.Value;
         _databases = databases.Value;
         _logger = logger;
@@ -48,6 +45,7 @@ public sealed class DatabaseRestoreService
 
     public async Task<DatabaseRestoreResult> RunAsync(
         RestoreTaskForAgentDto task,
+        IUploadService uploader,
         IProgressReporter<RestoreStage> reporter,
         CancellationToken ct)
     {
@@ -75,7 +73,7 @@ public sealed class DatabaseRestoreService
             reporter.Report(RestoreStage.DownloadingDump, processed: 0, unit: "bytes");
             var downloadProgress = new Progress<long>(bytes =>
                 reporter.Report(RestoreStage.DownloadingDump, processed: bytes, unit: "bytes"));
-            await _upload.DownloadAsync(task.DumpObjectKey, encryptedPath, downloadProgress, ct);
+            await uploader.DownloadAsync(task.DumpObjectKey, encryptedPath, downloadProgress, ct);
 
             var decryptedPath = Path.Combine(tempDir, "dump.bin");
             reporter.Report(RestoreStage.DecryptingDump);

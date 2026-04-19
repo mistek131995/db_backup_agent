@@ -2,5 +2,5 @@ namespace DbBackupAgent.Services.Upload;
 
 public interface IUploadServiceFactory
 {
-    IUploadService GetService();
+    IUploadService GetService(string storageName);
 }

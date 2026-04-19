@@ -153,7 +153,7 @@ dotnet run --project DbBackupAgent/DbBackupAgent.csproj
 Агент **не падает** если конфигурация не заполнена:
 
 - Нет ключа шифрования — логирует warning, пропускает бэкапы
-- Нет настроек S3 — логирует warning, клиент не создаётся до первого вызова
+- Нет настроек хранилища у storage — при первом обращении клиент упадёт с явной ошибкой; другие БД с корректным storage продолжат работать
 - Нет баз данных — логирует warning, пропускает бэкапы
 - Token и DashboardUrl пустые — расписание не загружается, агент простаивает
 
@@ -165,9 +165,15 @@ dotnet run --project DbBackupAgent/DbBackupAgent.csproj
 
 Все настройки в `appsettings.json`. Любой параметр можно переопределить переменной окружения.
 
-### Подключения и базы данных
+### Подключения, хранилища и базы данных
 
-Конфиг разделён на два списка: `Connections[]` хранит данные серверов (хост, логин, пароль, тип БД), `Databases[]` — список баз, каждая ссылается на подключение по имени. Это удобно, когда на одном сервере несколько БД — реквизиты не дублируются.
+Конфиг разбит на три списка:
+
+- `Connections[]` — реквизиты серверов БД (хост, логин, пароль, тип).
+- `Storages[]` — хранилища для бэкапов (S3 или SFTP); у каждого уникальное имя и собственный набор настроек.
+- `Databases[]` — список баз; каждая ссылается на подключение и на хранилище по имени.
+
+Такое разделение позволяет не дублировать реквизиты сервера для нескольких БД и класть разные БД в разные бакеты/хранилища.
 
 ```json
 "Connections": [
@@ -190,15 +196,41 @@ dotnet run --project DbBackupAgent/DbBackupAgent.csproj
     "AgentBackupPath": null
   }
 ],
+"Storages": [
+  {
+    "Name": "prod-s3",
+    "Provider": "S3",
+    "S3": {
+      "EndpointUrl": "https://storage.yandexcloud.net",
+      "AccessKey": "...",
+      "SecretKey": "...",
+      "BucketName": "prod-backups",
+      "Region": "us-east-1"
+    }
+  },
+  {
+    "Name": "archive-sftp",
+    "Provider": "Sftp",
+    "Sftp": {
+      "Host": "backup.example.com",
+      "Port": 22,
+      "Username": "backupuser",
+      "PrivateKeyPath": "/root/.ssh/id_rsa",
+      "RemotePath": "/var/backups"
+    }
+  }
+],
 "Databases": [
   {
     "ConnectionName": "main-pg",
+    "StorageName": "prod-s3",
     "Database": "mydb",
     "OutputPath": "/tmp/backups",
     "FilePaths": []
   },
   {
     "ConnectionName": "reporting-mssql",
+    "StorageName": "archive-sftp",
     "Database": "mydb2",
     "OutputPath": "/tmp/backups",
     "FilePaths": ["/etc/myapp/config.yml", "/var/data/certs"]
@@ -206,11 +238,11 @@ dotnet run --project DbBackupAgent/DbBackupAgent.csproj
 ]
 ```
 
-- `Name` подключения должно быть уникальным в пределах `Connections[]`.
-- `ConnectionName` у БД обязан ссылаться на существующее подключение — иначе эта БД будет пропущена с ошибкой в логе, остальные продолжат работать.
+- `Name` подключения и `Name` хранилища должны быть уникальны в пределах своих списков.
+- `ConnectionName` и `StorageName` у БД обязаны ссылаться на существующие записи — иначе эта БД будет пропущена с ошибкой в логе, остальные продолжат работать.
 - `OutputPath` — папка для временных файлов дампа. Файлы удаляются после загрузки.
-- `FilePaths` — список путей к файлам или директориям для файлового бэкапа. Директории обходятся рекурсивно. Файлы режутся на content-defined chunks (FastCDC, ~4 МиБ) и дедуплицируются между бэкапами. Работает только при `UploadSettings.Provider = "S3"`. Поле необязательное, по умолчанию пустое.
-- `SharedBackupPath` / `AgentBackupPath` — **только для MSSQL**, подробнее — в разделе [MSSQL: каталог `.bak`](#mssql-каталог-bak). Для Postgres поля не используются.
+- `FilePaths` — список путей к файлам или директориям для файлового бэкапа. Директории обходятся рекурсивно. Файлы режутся на content-defined chunks (FastCDC, ~4 МиБ) и дедуплицируются внутри одного хранилища. Работает только на S3-хранилищах. Поле необязательное.
+- `SharedBackupPath` / `AgentBackupPath` — **только для MSSQL**, подробнее — в разделе [MSSQL: каталог `.bak`](#mssql-каталог-bak). Для Postgres и MySQL поля не используются.
 
 ### Шифрование
 
@@ -230,39 +262,49 @@ openssl rand -base64 32
 [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
 ```
 
-### Хранилище — S3
+### Хранилища — настройки провайдеров
+
+Каждая запись в `Storages[]` имеет поле `Provider` (`S3` или `Sftp`) и соответствующий вложенный блок (`S3` либо `Sftp`). Лишний блок для выбранного провайдера игнорируется.
+
+**S3-хранилище:**
 
 ```json
-"UploadSettings": { "Provider": "S3" },
-"S3Settings": {
-  "EndpointUrl": "https://storage.yandexcloud.net",
-  "AccessKey": "...",
-  "SecretKey": "...",
-  "BucketName": "my-bucket",
-  "Region": "us-east-1"
+{
+  "Name": "prod-s3",
+  "Provider": "S3",
+  "S3": {
+    "EndpointUrl": "https://storage.yandexcloud.net",
+    "AccessKey": "...",
+    "SecretKey": "...",
+    "BucketName": "my-bucket",
+    "Region": "us-east-1"
+  }
 }
 ```
 
 > Для MinIO и Yandex Object Storage включён `ForcePathStyle` — ничего дополнительно настраивать не нужно.
 
-### Хранилище — SFTP
+**SFTP-хранилище:**
 
 ```json
-"UploadSettings": { "Provider": "Sftp" },
-"SftpSettings": {
-  "Host": "backup.example.com",
-  "Port": 22,
-  "Username": "backupuser",
-  "Password": "",
-  "PrivateKeyPath": "/root/.ssh/id_rsa",
-  "PrivateKeyPassphrase": "",
-  "RemotePath": "/var/backups"
+{
+  "Name": "archive-sftp",
+  "Provider": "Sftp",
+  "Sftp": {
+    "Host": "backup.example.com",
+    "Port": 22,
+    "Username": "backupuser",
+    "Password": "",
+    "PrivateKeyPath": "/root/.ssh/id_rsa",
+    "PrivateKeyPassphrase": "",
+    "RemotePath": "/var/backups"
+  }
 }
 ```
 
 Поддерживается аутентификация по паролю и по приватному ключу. Удалённые директории создаются автоматически.
 
-> **Файловый бэкап (`FilePaths`) не работает с SFTP** — у SFTP нет дешёвого `HEAD` для дедупликации кусков. При непустом `FilePaths` дамп загрузится, файлы будут пропущены с warning.
+> **Файловый бэкап (`FilePaths`) не работает на SFTP-хранилищах** — у SFTP нет дешёвого `HEAD` для дедупликации кусков. При непустом `FilePaths` для базы, смотрящей на SFTP-хранилище, дамп загрузится, файлы будут пропущены с warning.
 
 ### Подключение к Dashboard
 
@@ -288,7 +330,7 @@ AgentSettings__DashboardUrl=http://your-server:8080
 ## Структура файлов в хранилище
 
 ```
-{database}_{yyyy-MM-dd_HH-mm-ss}/
+{database}/{yyyy-MM-dd_HH-mm-ss}/
   {database}_{yyyyMMdd_HHmmss}.sql.gz.enc    ← PostgreSQL дамп
   {database}_{yyyyMMdd_HHmmss}.bak.enc       ← MSSQL дамп
   manifest.json.enc                          ← манифест файлового бэкапа (если FilePaths непуст)

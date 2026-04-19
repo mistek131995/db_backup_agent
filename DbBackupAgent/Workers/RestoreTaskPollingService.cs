@@ -1,3 +1,4 @@
+using DbBackupAgent.Configuration;
 using DbBackupAgent.Contracts;
 using DbBackupAgent.Domain;
 using DbBackupAgent.Enums;
@@ -5,7 +6,9 @@ using DbBackupAgent.Services;
 using DbBackupAgent.Services.Common;
 using DbBackupAgent.Services.Dashboard;
 using DbBackupAgent.Services.Restore;
+using DbBackupAgent.Services.Upload;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DbBackupAgent.Workers;
 
@@ -20,6 +23,8 @@ public sealed class RestoreTaskPollingService : BackgroundService
     private readonly FileRestoreService _fileRestore;
     private readonly IAgentActivityLock _activityLock;
     private readonly IProgressReporterFactory _reporterFactory;
+    private readonly IUploadServiceFactory _uploadFactory;
+    private readonly List<DatabaseConfig> _databases;
     private readonly ILogger<RestoreTaskPollingService> _logger;
 
     public RestoreTaskPollingService(
@@ -28,6 +33,8 @@ public sealed class RestoreTaskPollingService : BackgroundService
         FileRestoreService fileRestore,
         IAgentActivityLock activityLock,
         IProgressReporterFactory reporterFactory,
+        IUploadServiceFactory uploadFactory,
+        IOptions<List<DatabaseConfig>> databases,
         ILogger<RestoreTaskPollingService> logger)
     {
         _client = client;
@@ -35,6 +42,8 @@ public sealed class RestoreTaskPollingService : BackgroundService
         _fileRestore = fileRestore;
         _activityLock = activityLock;
         _reporterFactory = reporterFactory;
+        _uploadFactory = uploadFactory;
+        _databases = databases.Value;
         _logger = logger;
     }
 
@@ -102,13 +111,51 @@ public sealed class RestoreTaskPollingService : BackgroundService
 
         await using var reporter = _reporterFactory.CreateForRestore(task.TaskId);
 
-        var dbResult = await _databaseRestore.RunAsync(task, reporter, ct);
+        IUploadService uploader;
+        try
+        {
+            uploader = ResolveUploader(task);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "RestoreTaskPollingService: failed to resolve storage for task {TaskId}", task.TaskId);
+            return new PatchRestoreTaskDto
+            {
+                Status = RestoreTaskStatus.Failed,
+                DatabaseStatus = RestoreDatabaseStatus.Failed,
+                ErrorMessage = ex.Message,
+            };
+        }
+
+        var dbResult = await _databaseRestore.RunAsync(task, uploader, reporter, ct);
 
         var fileResult = task.ManifestKey is null
             ? FileRestoreResult.Skipped()
-            : await _fileRestore.RunAsync(task.ManifestKey, task.TargetFileRoot, reporter, ct);
+            : await _fileRestore.RunAsync(task.ManifestKey, task.TargetFileRoot, uploader, reporter, ct);
 
         return CombineResults(dbResult, fileResult);
+    }
+
+    internal IUploadService ResolveUploader(RestoreTaskForAgentDto task)
+    {
+        var storageName = task.StorageName;
+
+        if (string.IsNullOrWhiteSpace(storageName))
+        {
+            var dbConfig = _databases.FirstOrDefault(
+                d => string.Equals(d.Database, task.SourceDatabaseName, StringComparison.Ordinal));
+
+            if (dbConfig is null)
+            {
+                throw new InvalidOperationException(
+                    $"БД '{task.SourceDatabaseName}' не найдена в конфиге агента, а дашборд не передал StorageName. " +
+                    "Добавьте БД в конфиг либо обновите дашборд, чтобы он передавал имя хранилища.");
+            }
+
+            storageName = dbConfig.StorageName;
+        }
+
+        return _uploadFactory.GetService(storageName);
     }
 
     internal static PatchRestoreTaskDto CombineResults(DatabaseRestoreResult db, FileRestoreResult files)

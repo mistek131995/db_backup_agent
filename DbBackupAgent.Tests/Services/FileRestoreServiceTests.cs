@@ -42,7 +42,7 @@ public sealed class FileRestoreServiceTests
             NullLogger<EncryptionService>.Instance);
 
         _upload = new FakeUploadService();
-        _service = new FileRestoreService(_encryption, _upload, NullLogger<FileRestoreService>.Instance);
+        _service = new FileRestoreService(_encryption, NullLogger<FileRestoreService>.Instance);
     }
 
     [TearDown]
@@ -56,7 +56,7 @@ public sealed class FileRestoreServiceTests
     {
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", []));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -74,7 +74,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("data.bin", content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var restored = await File.ReadAllBytesAsync(Path.Combine(_tempRoot, "data.bin"));
@@ -100,7 +100,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("out.bin", expected.Length, 0, SafeMode, [sha2, sha1, sha3]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var restored = await File.ReadAllBytesAsync(Path.Combine(_tempRoot, "out.bin"));
@@ -116,7 +116,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("bad.bin", 999, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         var target = Path.Combine(_tempRoot, "bad.bin");
         Assert.Multiple(() =>
@@ -140,7 +140,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("f.bin", 200, 0, SafeMode, [sha1, missingSha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         var target = Path.Combine(_tempRoot, "f.bin");
         Assert.Multiple(() =>
@@ -165,7 +165,7 @@ public sealed class FileRestoreServiceTests
         var target = Path.Combine(_tempRoot, "f.bin");
         await File.WriteAllBytesAsync(target, new byte[] { 9, 9, 9 });
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         Assert.That(await File.ReadAllBytesAsync(target), Is.EqualTo(newContent));
@@ -179,7 +179,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry(@"C:\data\file.txt", content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var expected = Path.Combine(_tempRoot, "C", "data", "file.txt");
@@ -194,7 +194,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("/var/log/app.log", content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var expected = Path.Combine(_tempRoot, "var", "log", "app.log");
@@ -209,7 +209,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("sub/other\\leaf.bin", content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         var expected = Path.Combine(_tempRoot, "sub", "other", "leaf.bin");
@@ -225,7 +225,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry(target, content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, targetFileRoot: null, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, targetFileRoot: null, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(RestoreFilesStatus.Success));
         Assert.That(File.Exists(target), Is.True);
@@ -249,7 +249,7 @@ public sealed class FileRestoreServiceTests
         };
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", entries));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -273,7 +273,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("f.bin", content.Length, 0, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -292,7 +292,7 @@ public sealed class FileRestoreServiceTests
             entries.Add(new FileEntry($"f{i}.bin", 50, 0, SafeMode, [missing]));
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", entries));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -312,7 +312,7 @@ public sealed class FileRestoreServiceTests
             entries.Add(new FileEntry($"{longPart}-{i}.bin", 50, 0, SafeMode, [missing]));
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", entries));
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -330,7 +330,7 @@ public sealed class FileRestoreServiceTests
         ]));
         _upload.TamperBytes(ManifestKey);
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -347,7 +347,7 @@ public sealed class FileRestoreServiceTests
         var encrypted = _encryption.Encrypt(garbage);
         _upload.SetBytes(ManifestKey, encrypted);
 
-        var result = await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -373,7 +373,7 @@ public sealed class FileRestoreServiceTests
         cts.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(
-            () => _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), cts.Token));
+            () => _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), cts.Token));
     }
 
     [Test]
@@ -385,7 +385,7 @@ public sealed class FileRestoreServiceTests
         var entry = new FileEntry("m.bin", content.Length, mtime, SafeMode, [sha]);
         StoreManifest(new FileManifest(DateTime.UtcNow, "db", "dump.key", [entry]));
 
-        await _service.RunAsync(ManifestKey, _tempRoot, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        await _service.RunAsync(ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         var actual = new DateTimeOffset(File.GetLastWriteTimeUtc(Path.Combine(_tempRoot, "m.bin")))
             .ToUnixTimeSeconds();

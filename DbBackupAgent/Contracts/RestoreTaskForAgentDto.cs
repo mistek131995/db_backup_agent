@@ -9,4 +9,5 @@ public sealed class RestoreTaskForAgentDto
     public string? ManifestKey { get; init; }
     public string? TargetFileRoot { get; init; }
     public string? TargetConnectionName { get; init; }
+    public string? StorageName { get; init; }
 }

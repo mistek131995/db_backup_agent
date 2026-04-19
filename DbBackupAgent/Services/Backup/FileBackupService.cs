@@ -12,30 +12,27 @@ public sealed class FileBackupService
 {
     private readonly ContentDefinedChunker _chunker;
     private readonly EncryptionService _encryption;
-    private readonly IUploadServiceFactory _uploadFactory;
     private readonly ILogger<FileBackupService> _logger;
     private bool _consistencyWarningLogged;
 
     public FileBackupService(
         ContentDefinedChunker chunker,
         EncryptionService encryption,
-        IUploadServiceFactory uploadFactory,
         ILogger<FileBackupService> logger)
     {
         _chunker = chunker;
         _encryption = encryption;
-        _uploadFactory = uploadFactory;
         _logger = logger;
     }
 
     public async Task<FileBackupResult> CaptureAsync(
         List<string> filePaths,
+        IUploadService uploader,
         IProgressReporter<BackupStage> reporter,
         CancellationToken ct)
     {
         LogConsistencyWarningOnce();
 
-        var uploader = _uploadFactory.GetService();
         var files = new List<FileEntry>();
         int newChunksTotal = 0;
 

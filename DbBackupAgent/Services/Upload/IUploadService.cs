@@ -5,7 +5,7 @@ public interface IUploadService
     /// <summary>
     /// Uploads <paramref name="filePath"/> to the configured storage under
     /// <c>{folder}/{filename}</c>. Caller is responsible for building the folder name
-    /// (typically <c>{database}_{yyyy-MM-dd_HH-mm-ss}</c>).
+    /// (typically <c>{database}/{yyyy-MM-dd_HH-mm-ss}</c>).
     /// </summary>
     /// <param name="progress">Optional byte-level progress sink (cumulative bytes transferred).</param>
     /// <returns>Storage path string identifying where the file was stored.</returns>

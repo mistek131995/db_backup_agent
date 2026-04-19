@@ -19,22 +19,20 @@ public sealed class FileRestoreService
     };
 
     private readonly EncryptionService _encryption;
-    private readonly IUploadService _upload;
     private readonly ILogger<FileRestoreService> _logger;
 
     public FileRestoreService(
         EncryptionService encryption,
-        IUploadService upload,
         ILogger<FileRestoreService> logger)
     {
         _encryption = encryption;
-        _upload = upload;
         _logger = logger;
     }
 
     public async Task<FileRestoreResult> RunAsync(
         string manifestKey,
         string? targetFileRoot,
+        IUploadService uploader,
         IProgressReporter<RestoreStage> reporter,
         CancellationToken ct)
     {
@@ -43,7 +41,7 @@ public sealed class FileRestoreService
         FileManifest manifest;
         try
         {
-            var encrypted = await _upload.DownloadBytesAsync(manifestKey, ct);
+            var encrypted = await uploader.DownloadBytesAsync(manifestKey, ct);
             var json = _encryption.Decrypt(encrypted);
             manifest = JsonSerializer.Deserialize<FileManifest>(json, JsonOptions)
                 ?? throw new InvalidDataException("Manifest JSON deserialized to null.");
@@ -115,7 +113,7 @@ public sealed class FileRestoreService
 
             try
             {
-                await RestoreFileAsync(entry, targetFileRoot, ct);
+                await RestoreFileAsync(entry, targetFileRoot, uploader, ct);
                 restored++;
             }
             catch (OperationCanceledException)
@@ -144,7 +142,7 @@ public sealed class FileRestoreService
         return FileRestoreResult.Partial(restored, failed.Count, message);
     }
 
-    private async Task RestoreFileAsync(FileEntry entry, string? targetFileRoot, CancellationToken ct)
+    private async Task RestoreFileAsync(FileEntry entry, string? targetFileRoot, IUploadService uploader, CancellationToken ct)
     {
         var targetPath = ResolveTargetPath(entry.Path, targetFileRoot);
         var targetDir = Path.GetDirectoryName(targetPath);
@@ -163,7 +161,7 @@ public sealed class FileRestoreService
                 {
                     if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
 
-                    var encrypted = await _upload.DownloadBytesAsync($"chunks/{chunkSha}", ct);
+                    var encrypted = await uploader.DownloadBytesAsync($"chunks/{chunkSha}", ct);
                     var plaintext = _encryption.Decrypt(encrypted);
                     await stream.WriteAsync(plaintext, ct);
                 }

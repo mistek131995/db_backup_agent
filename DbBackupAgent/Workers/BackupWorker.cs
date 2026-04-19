@@ -14,6 +14,7 @@ public sealed class BackupWorker : BackgroundService
     private readonly ScheduleService _schedule;
     private readonly EncryptionService _encryption;
     private readonly ConnectionResolver _connections;
+    private readonly StorageResolver _storages;
     private readonly List<DatabaseConfig> _databases;
     private readonly List<DatabaseConfig> _validDatabases;
     private readonly ILogger<BackupWorker> _logger;
@@ -23,6 +24,7 @@ public sealed class BackupWorker : BackgroundService
         ScheduleService schedule,
         EncryptionService encryption,
         ConnectionResolver connections,
+        StorageResolver storages,
         IOptions<List<DatabaseConfig>> databases,
         ILogger<BackupWorker> logger)
     {
@@ -30,13 +32,17 @@ public sealed class BackupWorker : BackgroundService
         _schedule = schedule;
         _encryption = encryption;
         _connections = connections;
+        _storages = storages;
         _databases = databases.Value;
         _logger = logger;
-        _validDatabases = FilterValidDatabases(_databases, _connections, _logger);
+        _validDatabases = FilterValidDatabases(_databases, _connections, _storages, _logger);
     }
 
     private static List<DatabaseConfig> FilterValidDatabases(
-        List<DatabaseConfig> all, ConnectionResolver connections, ILogger<BackupWorker> logger)
+        List<DatabaseConfig> all,
+        ConnectionResolver connections,
+        StorageResolver storages,
+        ILogger<BackupWorker> logger)
     {
         var valid = new List<DatabaseConfig>(all.Count);
 
@@ -56,6 +62,23 @@ public sealed class BackupWorker : BackgroundService
                     "BackupWorker: database '{Database}' references unknown connection '{ConnectionName}', skipping. Available: {Available}",
                     db.Database, db.ConnectionName,
                     connections.Names.Count == 0 ? "(none)" : string.Join(", ", connections.Names));
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(db.StorageName))
+            {
+                logger.LogError(
+                    "BackupWorker: database '{Database}' has empty StorageName, skipping.",
+                    db.Database);
+                continue;
+            }
+
+            if (!storages.TryResolve(db.StorageName, out _))
+            {
+                logger.LogError(
+                    "BackupWorker: database '{Database}' references unknown storage '{StorageName}', skipping. Available: {Available}",
+                    db.Database, db.StorageName,
+                    storages.Names.Count == 0 ? "(none)" : string.Join(", ", storages.Names));
                 continue;
             }
 

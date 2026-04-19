@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using DbBackupAgent.Configuration;
-using DbBackupAgent.Enums;
 using DbBackupAgent.Providers;
 using DbBackupAgent.Services;
 using DbBackupAgent.Services.Backup;
@@ -26,29 +25,19 @@ builder.Services.AddSystemd();
 builder.Configuration.AddJsonFile(
     Path.Combine(configDir, "appsettings.json"), optional: true, reloadOnChange: false);
 
-// Env vars must win over the external config file
 builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.Configure<List<ConnectionConfig>>(
     builder.Configuration.GetSection("Connections"));
+
+builder.Services.Configure<List<StorageConfig>>(
+    builder.Configuration.GetSection("Storages"));
 
 builder.Services.Configure<List<DatabaseConfig>>(
     builder.Configuration.GetSection("Databases"));
 
 builder.Services.Configure<EncryptionSettings>(
     builder.Configuration.GetSection("EncryptionSettings"));
-
-builder.Services.Configure<S3Settings>(
-    builder.Configuration.GetSection("S3Settings"));
-
-builder.Services.Configure<SftpSettings>(
-    builder.Configuration.GetSection("SftpSettings"));
-
-builder.Services.AddOptions<UploadSettings>()
-    .Bind(builder.Configuration.GetSection("UploadSettings"))
-    .Validate(s => Enum.IsDefined(s.Provider),
-        $"UploadSettings:Provider must be one of: {string.Join(", ", Enum.GetNames<UploadProvider>())}")
-    .ValidateOnStart();
 
 builder.Services.Configure<AgentSettings>(
     builder.Configuration.GetSection("AgentSettings"));
@@ -77,14 +66,13 @@ builder.Services.AddSingleton(new ActivitySource("DbBackupAgent"));
 builder.Services.AddSingleton<IAgentActivityLock, AgentActivityLock>();
 builder.Services.AddSingleton(sp =>
     new ConnectionResolver(sp.GetRequiredService<IOptions<List<ConnectionConfig>>>().Value));
+builder.Services.AddSingleton(sp =>
+    new StorageResolver(sp.GetRequiredService<IOptions<List<StorageConfig>>>().Value));
 builder.Services.AddSingleton<EncryptionService>();
 builder.Services.AddSingleton<ContentDefinedChunker>();
 builder.Services.AddSingleton<FileBackupService>();
 builder.Services.AddSingleton<ManifestStore>();
-builder.Services.AddSingleton<S3UploadService>();
-builder.Services.AddSingleton<SftpUploadService>();
 builder.Services.AddSingleton<IUploadServiceFactory, UploadServiceFactory>();
-builder.Services.AddSingleton<IUploadService>(sp => sp.GetRequiredService<S3UploadService>());
 builder.Services.AddHttpClient<IBackupRecordClient, BackupRecordClient>();
 builder.Services.AddHttpClient<ScheduleService>();
 builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>();

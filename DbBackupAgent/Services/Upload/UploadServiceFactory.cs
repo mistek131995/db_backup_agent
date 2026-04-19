@@ -1,29 +1,45 @@
+using System.Collections.Concurrent;
+using DbBackupAgent.Configuration;
 using DbBackupAgent.Enums;
-using DbBackupAgent.Settings;
-using Microsoft.Extensions.Options;
+using DbBackupAgent.Services.Common;
 
 namespace DbBackupAgent.Services.Upload;
 
 public sealed class UploadServiceFactory : IUploadServiceFactory
 {
-    private readonly UploadSettings _uploadSettings;
-    private readonly S3UploadService _s3;
-    private readonly SftpUploadService _sftp;
+    private readonly StorageResolver _storages;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ConcurrentDictionary<string, IUploadService> _cache = new(StringComparer.Ordinal);
 
-    public UploadServiceFactory(
-        IOptions<UploadSettings> uploadSettings,
-        S3UploadService s3,
-        SftpUploadService sftp)
+    public UploadServiceFactory(StorageResolver storages, ILoggerFactory loggerFactory)
     {
-        _uploadSettings = uploadSettings.Value;
-        _s3 = s3;
-        _sftp = sftp;
+        _storages = storages;
+        _loggerFactory = loggerFactory;
     }
 
-    public IUploadService GetService() => _uploadSettings.Provider switch
+    public IUploadService GetService(string storageName)
     {
-        UploadProvider.Sftp => _sftp,
-        UploadProvider.S3 => _s3,
-        _ => throw new InvalidOperationException($"Unknown upload provider: {_uploadSettings.Provider}"),
-    };
+        ArgumentException.ThrowIfNullOrWhiteSpace(storageName);
+
+        return _cache.GetOrAdd(storageName, Create);
+    }
+
+    private IUploadService Create(string storageName)
+    {
+        var storage = _storages.Resolve(storageName);
+
+        return storage.Provider switch
+        {
+            UploadProvider.S3 => new S3UploadService(
+                storage.S3 ?? throw new InvalidOperationException(
+                    $"Storage '{storageName}' has Provider=S3 but S3 settings are missing."),
+                _loggerFactory.CreateLogger<S3UploadService>()),
+            UploadProvider.Sftp => new SftpUploadService(
+                storage.Sftp ?? throw new InvalidOperationException(
+                    $"Storage '{storageName}' has Provider=Sftp but Sftp settings are missing."),
+                _loggerFactory.CreateLogger<SftpUploadService>()),
+            _ => throw new InvalidOperationException(
+                $"Storage '{storageName}' has unknown provider: {storage.Provider}"),
+        };
+    }
 }

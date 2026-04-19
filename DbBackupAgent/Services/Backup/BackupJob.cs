@@ -16,6 +16,7 @@ public sealed class BackupJob
 {
     private readonly IBackupProviderFactory _factory;
     private readonly ConnectionResolver _connections;
+    private readonly StorageResolver _storages;
     private readonly EncryptionService _encryption;
     private readonly IUploadServiceFactory _uploadFactory;
     private readonly FileBackupService _fileBackup;
@@ -23,7 +24,6 @@ public sealed class BackupJob
     private readonly IBackupRecordClient _recordClient;
     private readonly IProgressReporterFactory _reporterFactory;
     private readonly IAgentActivityLock _activityLock;
-    private readonly UploadSettings _uploadSettings;
     private readonly AgentSettings _agentSettings;
     private readonly ActivitySource _activitySource;
     private readonly ILogger<BackupJob> _logger;
@@ -31,6 +31,7 @@ public sealed class BackupJob
     public BackupJob(
         IBackupProviderFactory factory,
         ConnectionResolver connections,
+        StorageResolver storages,
         EncryptionService encryption,
         IUploadServiceFactory uploadFactory,
         FileBackupService fileBackup,
@@ -38,13 +39,13 @@ public sealed class BackupJob
         IBackupRecordClient recordClient,
         IProgressReporterFactory reporterFactory,
         IAgentActivityLock activityLock,
-        IOptions<UploadSettings> uploadSettings,
         IOptions<AgentSettings> agentSettings,
         ActivitySource activitySource,
         ILogger<BackupJob> logger)
     {
         _factory = factory;
         _connections = connections;
+        _storages = storages;
         _encryption = encryption;
         _uploadFactory = uploadFactory;
         _fileBackup = fileBackup;
@@ -52,7 +53,6 @@ public sealed class BackupJob
         _recordClient = recordClient;
         _reporterFactory = reporterFactory;
         _activityLock = activityLock;
-        _uploadSettings = uploadSettings.Value;
         _agentSettings = agentSettings.Value;
         _activitySource = activitySource;
         _logger = logger;
@@ -65,14 +65,11 @@ public sealed class BackupJob
         using var activity = _activitySource.StartActivity("backup.run");
         activity?.SetTag("database", config.Database);
         activity?.SetTag("connection", config.ConnectionName);
-
-        var connection = _connections.Resolve(config.ConnectionName);
-        var provider = _factory.GetProvider(connection.DatabaseType);
-        var backupFolder = $"{config.Database}_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}";
+        activity?.SetTag("storage", config.StorageName);
 
         _logger.LogInformation(
-            "BackupJob starting. Provider: {ProviderType}, Connection: '{Connection}', Database: '{Database}', Folder: '{Folder}', TraceId: {TraceId}",
-            provider.GetType().Name, connection.Name, config.Database, backupFolder, activity?.TraceId.ToString() ?? "-");
+            "BackupJob starting. Database: '{Database}', Connection: '{Connection}', Storage: '{Storage}', TraceId: {TraceId}",
+            config.Database, config.ConnectionName, config.StorageName, activity?.TraceId.ToString() ?? "-");
 
         var recordId = await _recordClient.OpenAsync(
             new OpenBackupRecordDto
@@ -98,10 +95,23 @@ public sealed class BackupJob
         string? dumpFile = null;
         string? encryptedFile = null;
         string? dumpObjectKey = null;
+        string? backupFolder = null;
+        StorageConfig? storage = null;
+        IUploadService? uploader = null;
         BackupResult result = new() { Success = false, ErrorMessage = "Unknown error" };
 
         try
         {
+            var connection = _connections.Resolve(config.ConnectionName);
+            storage = _storages.Resolve(config.StorageName);
+            var provider = _factory.GetProvider(connection.DatabaseType);
+            uploader = _uploadFactory.GetService(config.StorageName);
+            backupFolder = $"{config.Database}/{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}";
+
+            _logger.LogInformation(
+                "BackupJob resolved. Provider: {ProviderType}, Folder: '{Folder}'",
+                provider.GetType().Name, backupFolder);
+
             _logger.LogInformation("Step 1/3: dump");
             reporter.Report(BackupStage.Dumping);
             var dumpResult = await provider.BackupAsync(config, connection, ct);
@@ -112,7 +122,6 @@ public sealed class BackupJob
             encryptedFile = await _encryption.EncryptAsync(dumpFile, ct);
 
             _logger.LogInformation("Step 3/3: upload");
-            var uploader = _uploadFactory.GetService();
             reporter.Report(BackupStage.UploadingDump, processed: 0, unit: "bytes");
             var uploadProgress = new Progress<long>(bytes =>
                 reporter.Report(BackupStage.UploadingDump, processed: bytes, unit: "bytes"));
@@ -149,8 +158,14 @@ public sealed class BackupJob
             TryDelete(encryptedFile);
         }
 
-        var (fileMetrics, fileError) = await CaptureFilesSafelyAsync(
-            config, backupFolder, dumpObjectKey, reporter, ct);
+        FileBackupMetrics? fileMetrics = null;
+        string? fileError = null;
+
+        if (storage is not null && uploader is not null && backupFolder is not null)
+        {
+            (fileMetrics, fileError) = await CaptureFilesSafelyAsync(
+                config, storage, uploader, backupFolder, dumpObjectKey, reporter, ct);
+        }
 
         await _recordClient.FinalizeAsync(
             recordId.Value,
@@ -162,6 +177,8 @@ public sealed class BackupJob
 
     internal async Task<(FileBackupMetrics? Metrics, string? Error)> CaptureFilesSafelyAsync(
         DatabaseConfig config,
+        StorageConfig storage,
+        IUploadService uploader,
         string backupFolder,
         string? dumpObjectKey,
         IProgressReporter<BackupStage> reporter,
@@ -170,13 +187,13 @@ public sealed class BackupJob
         if (config.FilePaths.Count == 0)
             return (null, null);
 
-        if (_uploadSettings.Provider == UploadProvider.Sftp)
+        if (storage.Provider == UploadProvider.Sftp)
         {
             _logger.LogWarning(
-                "File backup is not supported with SFTP provider. " +
+                "File backup is not supported on SFTP storage '{Storage}'. " +
                 "Skipping {Count} file path(s) for database '{Database}'",
-                config.FilePaths.Count, config.Database);
-            return (null, "Бэкап файлов не поддерживается с SFTP-провайдером. Файлы не загружены.");
+                storage.Name, config.FilePaths.Count, config.Database);
+            return (null, $"Бэкап файлов не поддерживается на SFTP-хранилище '{storage.Name}'. Файлы не загружены.");
         }
 
         try
@@ -186,13 +203,13 @@ public sealed class BackupJob
                 config.Database, config.FilePaths.Count);
 
             reporter.Report(BackupStage.CapturingFiles);
-            var capture = await _fileBackup.CaptureAsync(config.FilePaths, reporter, ct);
+            var capture = await _fileBackup.CaptureAsync(config.FilePaths, uploader, reporter, ct);
             var manifest = capture.Manifest with
             {
                 Database = config.Database,
                 DumpObjectKey = dumpObjectKey ?? string.Empty,
             };
-            var manifestKey = await _manifestStore.SaveAsync(manifest, backupFolder, ct);
+            var manifestKey = await _manifestStore.SaveAsync(manifest, backupFolder, uploader, ct);
 
             var metrics = new FileBackupMetrics
             {

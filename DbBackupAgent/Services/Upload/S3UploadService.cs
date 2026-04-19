@@ -1,7 +1,6 @@
 using Amazon.S3;
 using Amazon.S3.Model;
 using DbBackupAgent.Settings;
-using Microsoft.Extensions.Options;
 
 namespace DbBackupAgent.Services.Upload;
 
@@ -11,13 +10,13 @@ public sealed class S3UploadService : IUploadService, IDisposable
     private readonly ILogger<S3UploadService> _logger;
     private AmazonS3Client? _client;
 
-    public S3UploadService(IOptions<S3Settings> settings, ILogger<S3UploadService> logger)
+    public S3UploadService(S3Settings settings, ILogger<S3UploadService> logger)
     {
-        _settings = settings.Value;
+        _settings = settings;
         _logger = logger;
 
         if (string.IsNullOrWhiteSpace(_settings.EndpointUrl))
-            _logger.LogWarning("S3Settings:EndpointUrl is not set. S3 uploads will not work until configured.");
+            _logger.LogWarning("S3 EndpointUrl is not set. Uploads will not work until configured.");
     }
 
     private AmazonS3Client GetClient()
@@ -26,12 +25,11 @@ public sealed class S3UploadService : IUploadService, IDisposable
             return _client;
 
         if (string.IsNullOrWhiteSpace(_settings.EndpointUrl))
-            throw new InvalidOperationException("S3Settings:EndpointUrl is not configured.");
+            throw new InvalidOperationException("S3 EndpointUrl is not configured.");
 
         var config = new AmazonS3Config
         {
             ServiceURL = _settings.EndpointUrl,
-            // Path-style addressing is required by MinIO and Yandex Object Storage
             ForcePathStyle = true,
             AuthenticationRegion = _settings.Region,
         };
@@ -40,10 +38,6 @@ public sealed class S3UploadService : IUploadService, IDisposable
         return _client;
     }
 
-    /// <summary>
-    /// Uploads <paramref name="filePath"/> to S3 under the key <c>{folder}/{filename}</c>.
-    /// </summary>
-    /// <returns>Storage path in the form <c>s3://bucket/key</c>.</returns>
     public async Task<string> UploadAsync(string filePath, string folder, IProgress<long>? progress, CancellationToken ct)
     {
         var fileName = Path.GetFileName(filePath);
@@ -62,7 +56,6 @@ public sealed class S3UploadService : IUploadService, IDisposable
             BucketName = _settings.BucketName,
             Key = objectKey,
             InputStream = fileStream,
-            // Payload signing is not supported by all S3-compatible endpoints (e.g. MinIO, Yandex)
             DisablePayloadSigning = true,
         };
 

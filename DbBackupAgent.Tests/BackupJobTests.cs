@@ -37,11 +37,12 @@ public sealed class BackupJobTests
     [Test]
     public async Task CaptureFilesSafelyAsync_EmptyFilePaths_ReturnsBothNull()
     {
-        var job = BuildJob(UploadProvider.S3);
+        var job = BuildJob();
+        var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [] };
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
-            config, backupFolder: "db1_2026-04-17_00-00-00", dumpObjectKey: "db1_.../dump.enc",
+            config, storage, _uploader, backupFolder: "db1/2026-04-17_00-00-00", dumpObjectKey: "db1/.../dump.enc",
             TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
@@ -54,22 +55,23 @@ public sealed class BackupJobTests
     }
 
     [Test]
-    public async Task CaptureFilesSafelyAsync_SftpProvider_ReturnsUserFacingError()
+    public async Task CaptureFilesSafelyAsync_SftpStorage_ReturnsUserFacingError()
     {
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "a.bin"), new byte[] { 1, 2, 3 });
 
-        var job = BuildJob(UploadProvider.Sftp);
+        var job = BuildJob();
+        var storage = StorageFor(UploadProvider.Sftp);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
-            config, backupFolder: "db1_2026-04-17_00-00-00", dumpObjectKey: "db1_.../dump.enc",
+            config, storage, _uploader, backupFolder: "db1/2026-04-17_00-00-00", dumpObjectKey: "db1/.../dump.enc",
             TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
             Assert.That(metrics, Is.Null);
             Assert.That(error, Is.EqualTo(
-                "Бэкап файлов не поддерживается с SFTP-провайдером. Файлы не загружены."));
+                "Бэкап файлов не поддерживается на SFTP-хранилище 'sftp-storage'. Файлы не загружены."));
             Assert.That(_uploader.UploadCalls, Is.Zero, "SFTP branch must short-circuit before touching the uploader");
         });
     }
@@ -80,13 +82,14 @@ public sealed class BackupJobTests
         var content = RandomNumberGenerator.GetBytes(1024);
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "file.bin"), content);
 
-        var job = BuildJob(UploadProvider.S3);
+        var job = BuildJob();
+        var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "customers", FilePaths = [_tempRoot] };
-        const string backupFolder = "customers_2026-04-17_14-30-00";
-        const string dumpKey = "customers_2026-04-17_14-30-00/dump.sql.gz.enc";
+        const string backupFolder = "customers/2026-04-17_14-30-00";
+        const string dumpKey = "customers/2026-04-17_14-30-00/dump.sql.gz.enc";
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
-            config, backupFolder, dumpKey, TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
+            config, storage, _uploader, backupFolder, dumpKey, TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
         Assert.That(error, Is.Null);
         Assert.That(metrics, Is.Not.Null);
@@ -106,11 +109,12 @@ public sealed class BackupJobTests
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "file.bin"), new byte[] { 1, 2, 3, 4 });
         _uploader.ThrowOnUpload = new InvalidOperationException("simulated S3 403");
 
-        var job = BuildJob(UploadProvider.S3);
+        var job = BuildJob();
+        var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
         var (metrics, error) = await job.CaptureFilesSafelyAsync(
-            config, backupFolder: "db1_2026-04-17_14-30-00", dumpObjectKey: "db1_.../dump.enc",
+            config, storage, _uploader, backupFolder: "db1/2026-04-17_14-30-00", dumpObjectKey: "db1/.../dump.enc",
             TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
@@ -129,7 +133,8 @@ public sealed class BackupJobTests
         for (int i = 0; i < 3; i++)
             File.WriteAllBytes(Path.Combine(_tempRoot, $"f{i}.bin"), new byte[] { (byte)i });
 
-        var job = BuildJob(UploadProvider.S3);
+        var job = BuildJob();
+        var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
         using var cts = new CancellationTokenSource();
@@ -137,33 +142,39 @@ public sealed class BackupJobTests
 
         Assert.ThrowsAsync<OperationCanceledException>(() =>
             job.CaptureFilesSafelyAsync(
-                config, "db1_2026-04-17_14-30-00", "dump.enc",
+                config, storage, _uploader, "db1/2026-04-17_14-30-00", "dump.enc",
                 TestHelpers.NullReporter<BackupStage>(), cts.Token));
     }
 
-    private BackupJob BuildJob(UploadProvider provider)
+    private static StorageConfig StorageFor(UploadProvider provider) => provider switch
+    {
+        UploadProvider.S3 => new StorageConfig { Name = "s3-storage", Provider = UploadProvider.S3, S3 = new S3Settings() },
+        UploadProvider.Sftp => new StorageConfig { Name = "sftp-storage", Provider = UploadProvider.Sftp, Sftp = new SftpSettings() },
+        _ => throw new ArgumentOutOfRangeException(nameof(provider)),
+    };
+
+    private BackupJob BuildJob()
     {
         var encKey = RandomNumberGenerator.GetBytes(32);
         var encryption = new EncryptionService(
             Options.Create(new EncryptionSettings { Key = Convert.ToBase64String(encKey) }),
             NullLogger<EncryptionService>.Instance);
 
-        var uploadFactory = new StubUploadServiceFactory(_uploader);
         var chunker = new ContentDefinedChunker();
-        var fileBackup = new FileBackupService(chunker, encryption, uploadFactory, NullLogger<FileBackupService>.Instance);
-        var manifestStore = new ManifestStore(encryption, uploadFactory, NullLogger<ManifestStore>.Instance);
+        var fileBackup = new FileBackupService(chunker, encryption, NullLogger<FileBackupService>.Instance);
+        var manifestStore = new ManifestStore(encryption, NullLogger<ManifestStore>.Instance);
 
         return new BackupJob(
             new StubBackupProviderFactory(),
             new ConnectionResolver([]),
+            new StorageResolver([]),
             encryption,
-            uploadFactory,
+            new StubUploadServiceFactory(_uploader),
             fileBackup,
             manifestStore,
             new FakeBackupRecordClient(),
             new FakeProgressReporterFactory(),
             new AgentActivityLock(NullLogger<AgentActivityLock>.Instance),
-            Options.Create(new UploadSettings { Provider = provider }),
             Options.Create(new AgentSettings { Token = "test-token", DashboardUrl = "http://localhost" }),
             new ActivitySource("DbBackupAgent.Tests"),
             NullLogger<BackupJob>.Instance);
@@ -202,7 +213,7 @@ public sealed class BackupJobTests
 
     private sealed class StubUploadServiceFactory(IUploadService service) : IUploadServiceFactory
     {
-        public IUploadService GetService() => service;
+        public IUploadService GetService(string storageName) => service;
     }
 
     private sealed class StubBackupProviderFactory : IBackupProviderFactory
@@ -210,5 +221,4 @@ public sealed class BackupJobTests
         public IBackupProvider GetProvider(DatabaseType databaseType) =>
             throw new NotSupportedException("CaptureFilesSafelyAsync must not touch the backup provider");
     }
-
 }
