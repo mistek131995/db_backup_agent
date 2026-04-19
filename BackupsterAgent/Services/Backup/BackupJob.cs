@@ -76,6 +76,7 @@ public sealed class BackupJob
             {
                 DatabaseName = config.Database,
                 ConnectionName = config.ConnectionName,
+                StorageName = config.StorageName,
             }, ct);
 
         if (recordId is null)

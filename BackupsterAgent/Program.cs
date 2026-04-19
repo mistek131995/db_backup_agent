@@ -48,6 +48,9 @@ builder.Services.Configure<RestoreSettings>(
 builder.Services.Configure<GcSettings>(
     builder.Configuration.GetSection("GcSettings"));
 
+builder.Services.Configure<RetentionSettings>(
+    builder.Configuration.GetSection("RetentionSettings"));
+
 builder.Services.AddSingleton<PostgresBackupProvider>();
 builder.Services.AddSingleton<MssqlBackupProvider>();
 builder.Services.AddSingleton<MysqlBackupProvider>();
@@ -85,15 +88,19 @@ builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>(
     c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient<IRestoreTaskClient, RestoreTaskClient>(
     c => c.Timeout = TimeSpan.FromSeconds(60));
+builder.Services.AddHttpClient<IRetentionClient, RetentionClient>(
+    c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<IProgressReporterFactory, ProgressReporterFactory>();
 builder.Services.AddSingleton<DatabaseRestoreService>();
 builder.Services.AddSingleton<FileRestoreService>();
 builder.Services.AddSingleton<ChunkGcService>();
+builder.Services.AddSingleton<RetentionSweepService>();
 builder.Services.AddSingleton<BackupJob>();
 builder.Services.AddHostedService<BackupWorker>();
 builder.Services.AddHostedService<ConnectionSyncWorker>();
 builder.Services.AddHostedService<RestoreTaskPollingService>();
 builder.Services.AddHostedService<ChunkGcWorker>();
+builder.Services.AddHostedService<RetentionWorker>();
 
 var host = builder.Build();
 host.Run();
