@@ -44,26 +44,27 @@ public sealed class DatabaseRestoreService
     }
 
     public async Task<DatabaseRestoreResult> RunAsync(
-        RestoreTaskForAgentDto task,
+        Guid taskId,
+        RestoreTaskPayload payload,
         IUploadService uploader,
         IProgressReporter<RestoreStage> reporter,
         CancellationToken ct)
     {
-        var tempDir = ResolveTempDir(task.TaskId);
-        var targetDatabase = string.IsNullOrWhiteSpace(task.TargetDatabaseName)
-            ? task.SourceDatabaseName
-            : task.TargetDatabaseName!;
+        var tempDir = ResolveTempDir(taskId);
+        var targetDatabase = string.IsNullOrWhiteSpace(payload.TargetDatabaseName)
+            ? payload.SourceDatabaseName
+            : payload.TargetDatabaseName!;
 
         string? mssqlBakAgentPath = null;
 
         try
         {
-            var connection = ResolveTargetConnection(task);
+            var connection = ResolveTargetConnection(payload);
             var provider = _restoreFactory.GetProvider(connection.DatabaseType);
 
             _logger.LogInformation(
                 "DatabaseRestoreService starting. Task: {TaskId}, Target: '{Target}' on connection '{Connection}' ({Type})",
-                task.TaskId, targetDatabase, connection.Name, connection.DatabaseType);
+                taskId, targetDatabase, connection.Name, connection.DatabaseType);
 
             Directory.CreateDirectory(tempDir);
 
@@ -73,7 +74,7 @@ public sealed class DatabaseRestoreService
             reporter.Report(RestoreStage.DownloadingDump, processed: 0, unit: "bytes");
             var downloadProgress = new Progress<long>(bytes =>
                 reporter.Report(RestoreStage.DownloadingDump, processed: bytes, unit: "bytes"));
-            await uploader.DownloadAsync(task.DumpObjectKey, encryptedPath, downloadProgress, ct);
+            await uploader.DownloadAsync(payload.DumpObjectKey, encryptedPath, downloadProgress, ct);
 
             var decryptedPath = Path.Combine(tempDir, "dump.bin");
             reporter.Report(RestoreStage.DecryptingDump);
@@ -91,7 +92,7 @@ public sealed class DatabaseRestoreService
             }
             else if (connection.DatabaseType == DatabaseType.Mssql)
             {
-                var fileName = $"{targetDatabase}_{task.TaskId:N}.bak";
+                var fileName = $"{targetDatabase}_{taskId:N}.bak";
                 var sqlDir = MssqlSharedPathResolver.GetSqlDir(connection, tempDir);
                 var agentDir = MssqlSharedPathResolver.GetAgentDir(connection, tempDir);
                 Directory.CreateDirectory(agentDir);
@@ -116,7 +117,7 @@ public sealed class DatabaseRestoreService
 
             _logger.LogInformation(
                 "DatabaseRestoreService completed successfully. Task: {TaskId}, Target: '{Target}'",
-                task.TaskId, targetDatabase);
+                taskId, targetDatabase);
 
             return DatabaseRestoreResult.Success();
         }
@@ -126,61 +127,61 @@ public sealed class DatabaseRestoreService
         }
         catch (RestorePermissionException ex)
         {
-            _logger.LogError(ex, "DatabaseRestoreService: permission check failed for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: permission check failed for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(ex.Message);
         }
         catch (PostgresException ex) when (ex.SqlState == "42501")
         {
-            _logger.LogError(ex, "DatabaseRestoreService: Postgres permission denied for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: Postgres permission denied for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
                 $"Недостаточно прав у пользователя Postgres при выполнении restore БД '{targetDatabase}'. " +
                 "Требуются: роль CREATEDB и pg_signal_backend, либо superuser.");
         }
         catch (SqlException ex) when (IsMssqlPermissionError(ex))
         {
-            _logger.LogError(ex, "DatabaseRestoreService: MSSQL permission denied for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: MSSQL permission denied for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
                 $"Недостаточно прав у пользователя MSSQL при выполнении restore БД '{targetDatabase}'. " +
                 "Требуется членство в server-роли sysadmin или dbcreator.");
         }
         catch (MySqlException ex) when (IsMysqlPermissionError(ex))
         {
-            _logger.LogError(ex, "DatabaseRestoreService: MySQL permission denied for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: MySQL permission denied for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
                 $"Недостаточно прав у пользователя MySQL при выполнении restore БД '{targetDatabase}'. " +
                 $"Требуются привилегии CREATE и DROP на БД либо глобально (ON *.*).");
         }
         catch (AuthenticationTagMismatchException ex)
         {
-            _logger.LogError(ex, "DatabaseRestoreService: decrypt auth tag mismatch for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: decrypt auth tag mismatch for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
-                $"Не удалось расшифровать дамп БД '{task.SourceDatabaseName}'. " +
+                $"Не удалось расшифровать дамп БД '{payload.SourceDatabaseName}'. " +
                 "Вероятные причины: EncryptionKey агента изменился после создания бэкапа, ключ отличается " +
                 "от того, что был на момент бэкапа, или файл повреждён в хранилище.");
         }
         catch (CryptographicException ex)
         {
-            _logger.LogError(ex, "DatabaseRestoreService: cryptographic error for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: cryptographic error for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
-                $"Ошибка криптографии при расшифровке дампа БД '{task.SourceDatabaseName}'. " +
+                $"Ошибка криптографии при расшифровке дампа БД '{payload.SourceDatabaseName}'. " +
                 "Проверьте EncryptionKey агента и целостность файла в хранилище.");
         }
         catch (InvalidDataException ex) when (ex.Message.Contains("Bad magic", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogError(ex, "DatabaseRestoreService: unknown file format for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: unknown file format for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
-                $"Формат зашифрованного файла '{task.DumpObjectKey}' не поддерживается этой версией агента. " +
+                $"Формат зашифрованного файла '{payload.DumpObjectKey}' не поддерживается этой версией агента. " +
                 "Обновите агент или используйте версию, которой был создан бэкап.");
         }
         catch (InvalidDataException ex)
         {
-            _logger.LogError(ex, "DatabaseRestoreService: truncated or invalid file for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: truncated or invalid file for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed(
-                $"Зашифрованный файл '{task.DumpObjectKey}' повреждён или усечён. Проверьте целостность в хранилище.");
+                $"Зашифрованный файл '{payload.DumpObjectKey}' повреждён или усечён. Проверьте целостность в хранилище.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "DatabaseRestoreService: unexpected error for task {TaskId}", task.TaskId);
+            _logger.LogError(ex, "DatabaseRestoreService: unexpected error for task {TaskId}", taskId);
             return DatabaseRestoreResult.Failed($"Ошибка восстановления БД: {ex.Message}");
         }
         finally
@@ -192,18 +193,18 @@ public sealed class DatabaseRestoreService
         }
     }
 
-    internal ConnectionConfig ResolveTargetConnection(RestoreTaskForAgentDto task)
+    internal ConnectionConfig ResolveTargetConnection(RestoreTaskPayload payload)
     {
-        if (!string.IsNullOrWhiteSpace(task.TargetConnectionName))
-            return _connections.Resolve(task.TargetConnectionName);
+        if (!string.IsNullOrWhiteSpace(payload.TargetConnectionName))
+            return _connections.Resolve(payload.TargetConnectionName);
 
         var dbConfig = _databases.FirstOrDefault(
-            d => string.Equals(d.Database, task.SourceDatabaseName, StringComparison.Ordinal));
+            d => string.Equals(d.Database, payload.SourceDatabaseName, StringComparison.Ordinal));
 
         if (dbConfig is null)
         {
             throw new InvalidOperationException(
-                $"БД '{task.SourceDatabaseName}' не найдена в конфиге агента. " +
+                $"БД '{payload.SourceDatabaseName}' не найдена в конфиге агента. " +
                 "Укажите target-подключение явно через TargetConnectionName.");
         }
 

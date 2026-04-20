@@ -174,7 +174,6 @@ public sealed class BackupJobTests
             manifestStore,
             new FakeBackupRecordClient(),
             new FakeProgressReporterFactory(),
-            new AgentActivityLock(NullLogger<AgentActivityLock>.Instance),
             Options.Create(new AgentSettings { Token = "test-token", DashboardUrl = "http://localhost" }),
             new ActivitySource("BackupsterAgent.Tests"),
             NullLogger<BackupJob>.Instance);

@@ -1,10 +1,8 @@
-using BackupsterAgent.Enums;
-
 namespace BackupsterAgent.Contracts;
 
-public sealed class RestoreProgressDto
+public sealed class AgentTaskProgressDto
 {
-    public RestoreStage Stage { get; init; }
+    public string Stage { get; init; } = string.Empty;
     public long? Processed { get; init; }
     public long? Total { get; init; }
     public string? Unit { get; init; }

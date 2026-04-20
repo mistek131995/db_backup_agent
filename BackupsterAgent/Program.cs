@@ -5,6 +5,7 @@ using BackupsterAgent.Services;
 using BackupsterAgent.Services.Backup;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Dashboard;
+using BackupsterAgent.Services.Delete;
 using BackupsterAgent.Services.Restore;
 using BackupsterAgent.Services.Upload;
 using BackupsterAgent.Settings;
@@ -70,6 +71,7 @@ ActivitySource.AddActivityListener(new ActivityListener
 builder.Services.AddSingleton(new ActivitySource("BackupsterAgent"));
 
 builder.Services.AddSingleton<IAgentActivityLock, AgentActivityLock>();
+builder.Services.AddSingleton<IBackupRunTracker, BackupRunTracker>();
 builder.Services.AddSingleton(sp =>
     new ConnectionResolver(sp.GetRequiredService<IOptions<List<ConnectionConfig>>>().Value));
 builder.Services.AddSingleton(sp =>
@@ -86,19 +88,20 @@ builder.Services.AddHttpClient<ScheduleService>(
     c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>(
     c => c.Timeout = TimeSpan.FromSeconds(20));
-builder.Services.AddHttpClient<IRestoreTaskClient, RestoreTaskClient>(
+builder.Services.AddHttpClient<IAgentTaskClient, AgentTaskClient>(
     c => c.Timeout = TimeSpan.FromSeconds(60));
 builder.Services.AddHttpClient<IRetentionClient, RetentionClient>(
     c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<IProgressReporterFactory, ProgressReporterFactory>();
 builder.Services.AddSingleton<DatabaseRestoreService>();
 builder.Services.AddSingleton<FileRestoreService>();
+builder.Services.AddSingleton<BackupDeleteService>();
 builder.Services.AddSingleton<ChunkGcService>();
 builder.Services.AddSingleton<RetentionSweepService>();
 builder.Services.AddSingleton<BackupJob>();
 builder.Services.AddHostedService<BackupWorker>();
 builder.Services.AddHostedService<ConnectionSyncWorker>();
-builder.Services.AddHostedService<RestoreTaskPollingService>();
+builder.Services.AddHostedService<AgentTaskPollingService>();
 builder.Services.AddHostedService<ChunkGcWorker>();
 builder.Services.AddHostedService<RetentionWorker>();
 

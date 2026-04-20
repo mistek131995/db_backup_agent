@@ -1,8 +1,8 @@
 using BackupsterAgent.Contracts;
-using BackupsterAgent.Enums;
+using BackupsterAgent.Domain;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Dashboard;
-using BackupsterAgent.Services.Upload;
+using BackupsterAgent.Services.Delete;
 
 namespace BackupsterAgent.Services.Backup;
 
@@ -10,18 +10,18 @@ public sealed class RetentionSweepService
 {
     private readonly IRetentionClient _client;
     private readonly StorageResolver _storages;
-    private readonly IUploadServiceFactory _uploadFactory;
+    private readonly BackupDeleteService _deleter;
     private readonly ILogger<RetentionSweepService> _logger;
 
     public RetentionSweepService(
         IRetentionClient client,
         StorageResolver storages,
-        IUploadServiceFactory uploadFactory,
+        BackupDeleteService deleter,
         ILogger<RetentionSweepService> logger)
     {
         _client = client;
         _storages = storages;
-        _uploadFactory = uploadFactory;
+        _deleter = deleter;
         _logger = logger;
     }
 
@@ -49,38 +49,47 @@ public sealed class RetentionSweepService
         }
 
         var unreachable = new List<Guid>();
-        int deleted = 0, skippedNonS3 = 0, failed = 0;
+        int deleted = 0, failed = 0;
 
         foreach (var record in batch)
         {
             if (ct.IsCancellationRequested) break;
 
             if (string.IsNullOrWhiteSpace(record.StorageName) ||
-                !_storages.TryResolve(record.StorageName, out var storage))
+                !_storages.TryResolve(record.StorageName, out _))
             {
                 unreachable.Add(record.Id);
                 continue;
             }
 
-            if (storage.Provider != UploadProvider.S3)
+            var payload = new DeleteTaskPayload
             {
-                _logger.LogDebug(
-                    "Retention: record {Id} on storage '{Storage}' (provider {Provider}) — only S3 retention is supported, skipping.",
-                    record.Id, record.StorageName, storage.Provider);
-                skippedNonS3++;
+                StorageName = record.StorageName,
+                DumpObjectKey = record.DumpObjectKey,
+                ManifestKey = record.ManifestKey,
+            };
+
+            BackupDeleteResult result;
+            try
+            {
+                result = await _deleter.RunAsync(record.Id, payload, reporter: null, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            if (!result.IsSuccess)
+            {
+                _logger.LogWarning(
+                    "Retention: failed to clean up record {Id} on storage '{Storage}': {Error}. Will retry next tick.",
+                    record.Id, record.StorageName, result.ErrorMessage);
+                failed++;
                 continue;
             }
 
             try
             {
-                var uploader = _uploadFactory.GetService(record.StorageName);
-
-                if (!string.IsNullOrEmpty(record.DumpObjectKey))
-                    await uploader.DeleteAsync(record.DumpObjectKey, ct);
-
-                if (!string.IsNullOrEmpty(record.ManifestKey))
-                    await uploader.DeleteAsync(record.ManifestKey, ct);
-
                 await _client.DeleteAsync(record.Id, ct);
                 deleted++;
             }
@@ -91,8 +100,8 @@ public sealed class RetentionSweepService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex,
-                    "Retention: failed to clean up record {Id} on storage '{Storage}'. Will retry next tick.",
-                    record.Id, record.StorageName);
+                    "Retention: storage cleaned but dashboard DELETE failed for record {Id}. Will retry next tick.",
+                    record.Id);
                 failed++;
             }
         }
@@ -116,7 +125,7 @@ public sealed class RetentionSweepService
         }
 
         _logger.LogInformation(
-            "Retention sweep finished: batch={Batch}, deleted={Deleted}, unreachable={Unreachable}, skippedNonS3={SkippedNonS3}, failed={Failed}.",
-            batch.Count, deleted, unreachable.Count, skippedNonS3, failed);
+            "Retention sweep finished: batch={Batch}, deleted={Deleted}, unreachable={Unreachable}, failed={Failed}.",
+            batch.Count, deleted, unreachable.Count, failed);
     }
 }

@@ -66,15 +66,14 @@ public sealed class DatabaseRestoreServiceTests
                 new DatabaseConfig { ConnectionName = PgConnectionName, Database = "main_db" },
             ]);
 
-        var task = new RestoreTaskForAgentDto
+        var payload = new RestoreTaskPayload
         {
-            TaskId = Guid.NewGuid(),
             SourceDatabaseName = "main_db",
             DumpObjectKey = "k",
             TargetConnectionName = OtherPgConnectionName,
         };
 
-        var resolved = service.ResolveTargetConnection(task);
+        var resolved = service.ResolveTargetConnection(payload);
 
         Assert.That(resolved.Name, Is.EqualTo(OtherPgConnectionName));
     }
@@ -89,14 +88,13 @@ public sealed class DatabaseRestoreServiceTests
                 new DatabaseConfig { ConnectionName = PgConnectionName, Database = "main_db" },
             ]);
 
-        var task = new RestoreTaskForAgentDto
+        var payload = new RestoreTaskPayload
         {
-            TaskId = Guid.NewGuid(),
             SourceDatabaseName = "main_db",
             DumpObjectKey = "k",
         };
 
-        var resolved = service.ResolveTargetConnection(task);
+        var resolved = service.ResolveTargetConnection(payload);
 
         Assert.That(resolved.Name, Is.EqualTo(PgConnectionName));
     }
@@ -108,14 +106,13 @@ public sealed class DatabaseRestoreServiceTests
             connections: [ConnPg(PgConnectionName)],
             databases: []);
 
-        var task = new RestoreTaskForAgentDto
+        var payload = new RestoreTaskPayload
         {
-            TaskId = Guid.NewGuid(),
             SourceDatabaseName = "missing_db",
             DumpObjectKey = "k",
         };
 
-        var ex = Assert.Throws<InvalidOperationException>(() => service.ResolveTargetConnection(task));
+        var ex = Assert.Throws<InvalidOperationException>(() => service.ResolveTargetConnection(payload));
         Assert.Multiple(() =>
         {
             Assert.That(ex!.Message, Does.Contain("missing_db"));
@@ -236,7 +233,7 @@ public sealed class DatabaseRestoreServiceTests
             connections: [ConnPg(PgConnectionName)],
             databases: [new DatabaseConfig { ConnectionName = PgConnectionName, Database = "db1" }]);
 
-        var result = await service.RunAsync(NewTask("db1"), _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await service.RunAsync(Guid.NewGuid(), NewTask("db1").Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -260,7 +257,7 @@ public sealed class DatabaseRestoreServiceTests
             connections: [ConnPg(PgConnectionName)],
             databases: [new DatabaseConfig { ConnectionName = PgConnectionName, Database = "db1" }]);
 
-        var result = await service.RunAsync(NewTask("db1"), _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await service.RunAsync(Guid.NewGuid(), NewTask("db1").Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -287,7 +284,7 @@ public sealed class DatabaseRestoreServiceTests
             databases: [new DatabaseConfig { ConnectionName = PgConnectionName, Database = "db1" }]);
 
         var task = NewTaskWithKey("db1", "dump.enc.key");
-        var result = await service.RunAsync(task, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await service.RunAsync(task.Id, task.Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -309,7 +306,7 @@ public sealed class DatabaseRestoreServiceTests
             databases: [new DatabaseConfig { ConnectionName = PgConnectionName, Database = "db1" }]);
 
         var task = NewTaskWithKey("db1", "dump.enc.key");
-        var result = await service.RunAsync(task, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await service.RunAsync(task.Id, task.Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -330,7 +327,7 @@ public sealed class DatabaseRestoreServiceTests
             databases: [new DatabaseConfig { ConnectionName = PgConnectionName, Database = "db1" }]);
 
         var task = NewTaskWithKey("db1", "dump.enc.key");
-        var result = await service.RunAsync(task, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await service.RunAsync(task.Id, task.Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -350,7 +347,7 @@ public sealed class DatabaseRestoreServiceTests
             connections: [ConnPg(PgConnectionName)],
             databases: [new DatabaseConfig { ConnectionName = PgConnectionName, Database = "db1" }]);
 
-        var result = await service.RunAsync(NewTask("db1"), _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        var result = await service.RunAsync(Guid.NewGuid(), NewTask("db1").Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
         Assert.Multiple(() =>
         {
@@ -371,7 +368,7 @@ public sealed class DatabaseRestoreServiceTests
         cts.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(
-            () => service.RunAsync(NewTask("db1"), _upload, TestHelpers.NullReporter<RestoreStage>(), cts.Token));
+            () => service.RunAsync(Guid.NewGuid(), NewTask("db1").Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), cts.Token));
         Assert.That(_provider.ValidateCalls, Is.EqualTo(1),
             "provider must be invoked with the cancelled token so cancellation is observed, not hand-fed");
     }
@@ -388,9 +385,9 @@ public sealed class DatabaseRestoreServiceTests
             restoreSettings: restoreSettings);
 
         var task = NewTask("db1");
-        await service.RunAsync(task, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+        await service.RunAsync(task.Id, task.Payload, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
 
-        var taskDir = Path.Combine(_tempRoot, task.TaskId.ToString("N"));
+        var taskDir = Path.Combine(_tempRoot, task.Id.ToString("N"));
         Assert.That(Directory.Exists(taskDir), Is.False, "per-task temp directory must be cleaned in finally");
     }
 
@@ -421,15 +418,17 @@ public sealed class DatabaseRestoreServiceTests
         Password = "p",
     };
 
-    private static RestoreTaskForAgentDto NewTask(string sourceDb) =>
+    private sealed record TestTask(Guid Id, RestoreTaskPayload Payload);
+
+    private static TestTask NewTask(string sourceDb) =>
         NewTaskWithKey(sourceDb, "dump.enc.key");
 
-    private static RestoreTaskForAgentDto NewTaskWithKey(string sourceDb, string dumpObjectKey) => new()
-    {
-        TaskId = Guid.NewGuid(),
-        SourceDatabaseName = sourceDb,
-        DumpObjectKey = dumpObjectKey,
-    };
+    private static TestTask NewTaskWithKey(string sourceDb, string dumpObjectKey) =>
+        new(Guid.NewGuid(), new RestoreTaskPayload
+        {
+            SourceDatabaseName = sourceDb,
+            DumpObjectKey = dumpObjectKey,
+        });
 
     private async Task<string> CreateDumpPayloadForEncryptionAsync(byte[] bytes)
     {

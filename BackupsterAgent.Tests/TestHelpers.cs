@@ -28,6 +28,9 @@ internal sealed class FakeProgressReporterFactory : IProgressReporterFactory
     public IProgressReporter<RestoreStage> CreateForRestore(Guid taskId) =>
         new NullProgressReporter<RestoreStage>();
 
+    public IProgressReporter<DeleteStage> CreateForDelete(Guid taskId) =>
+        new NullProgressReporter<DeleteStage>();
+
     public IProgressReporter<BackupStage> CreateForBackup(Guid backupRecordId) =>
         new NullProgressReporter<BackupStage>();
 }

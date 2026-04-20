@@ -1,8 +1,7 @@
 namespace BackupsterAgent.Contracts;
 
-public sealed class RestoreTaskForAgentDto
+public sealed class RestoreTaskPayload
 {
-    public Guid TaskId { get; init; }
     public string SourceDatabaseName { get; init; } = string.Empty;
     public string DumpObjectKey { get; init; } = string.Empty;
     public string? TargetDatabaseName { get; init; }

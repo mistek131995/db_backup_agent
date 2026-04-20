@@ -1,6 +1,6 @@
 namespace BackupsterAgent.Enums;
 
-public enum RestoreTaskStatus
+public enum AgentTaskStatus
 {
     Pending,
     InProgress,

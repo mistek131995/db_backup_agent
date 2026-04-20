@@ -10,7 +10,7 @@ using Polly.Retry;
 
 namespace BackupsterAgent.Services.Dashboard;
 
-public sealed class RestoreTaskClient : IRestoreTaskClient
+public sealed class AgentTaskClient : IAgentTaskClient
 {
     private static readonly TimeSpan[] RetryDelays =
     [
@@ -28,14 +28,14 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
     private readonly HttpClient _http;
     private readonly AgentSettings _settings;
     private readonly IDashboardAuthGuard _authGuard;
-    private readonly ILogger<RestoreTaskClient> _logger;
+    private readonly ILogger<AgentTaskClient> _logger;
     private readonly ResiliencePipeline _patchPipeline;
 
-    public RestoreTaskClient(
+    public AgentTaskClient(
         HttpClient http,
         IOptions<AgentSettings> settings,
         IDashboardAuthGuard authGuard,
-        ILogger<RestoreTaskClient> logger)
+        ILogger<AgentTaskClient> logger)
     {
         _http = http;
         _settings = settings.Value;
@@ -44,11 +44,11 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
         _patchPipeline = BuildPatchPipeline();
     }
 
-    public async Task<RestoreTaskForAgentDto?> FetchTaskAsync(CancellationToken ct)
+    public async Task<AgentTaskForAgentDto?> FetchTaskAsync(CancellationToken ct)
     {
         if (!IsConfigured()) return null;
 
-        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/restore-task";
+        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/task";
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add("X-Agent-Token", _settings.Token);
@@ -60,31 +60,30 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            _authGuard.OnUnauthorized($"{nameof(RestoreTaskClient)}.{nameof(FetchTaskAsync)}", _logger);
-            throw new DashboardUnauthorizedException($"{nameof(RestoreTaskClient)}.{nameof(FetchTaskAsync)}");
+            _authGuard.OnUnauthorized($"{nameof(AgentTaskClient)}.{nameof(FetchTaskAsync)}", _logger);
+            throw new DashboardUnauthorizedException($"{nameof(AgentTaskClient)}.{nameof(FetchTaskAsync)}");
         }
 
         response.EnsureSuccessStatusCode();
 
-        var task = await response.Content.ReadFromJsonAsync<RestoreTaskForAgentDto>(ct);
+        var task = await response.Content.ReadFromJsonAsync<AgentTaskForAgentDto>(JsonOptions, ct);
         if (task is null)
         {
-            _logger.LogWarning("RestoreTaskClient: server returned empty body for non-204 response");
+            _logger.LogWarning("AgentTaskClient: server returned empty body for non-204 response");
             return null;
         }
 
         _logger.LogInformation(
-            "RestoreTaskClient: received task {TaskId} (source '{Source}', target '{Target}')",
-            task.TaskId, task.SourceDatabaseName, task.TargetDatabaseName ?? task.SourceDatabaseName);
+            "AgentTaskClient: received task {TaskId} (type '{Type}')", task.Id, task.Type);
 
         return task;
     }
 
-    public async Task PatchTaskAsync(Guid taskId, PatchRestoreTaskDto patch, CancellationToken ct)
+    public async Task PatchTaskAsync(Guid taskId, PatchAgentTaskDto patch, CancellationToken ct)
     {
         if (!IsConfigured()) return;
 
-        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/restore-task/{taskId}";
+        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/task/{taskId}";
 
         await _patchPipeline.ExecuteAsync(async innerCt =>
         {
@@ -95,22 +94,21 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
             using var response = await _http.SendAsync(request, innerCt);
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                _authGuard.OnUnauthorized($"{nameof(RestoreTaskClient)}.{nameof(PatchTaskAsync)}", _logger);
-                throw new DashboardUnauthorizedException($"{nameof(RestoreTaskClient)}.{nameof(PatchTaskAsync)}");
+                _authGuard.OnUnauthorized($"{nameof(AgentTaskClient)}.{nameof(PatchTaskAsync)}", _logger);
+                throw new DashboardUnauthorizedException($"{nameof(AgentTaskClient)}.{nameof(PatchTaskAsync)}");
             }
             response.EnsureSuccessStatusCode();
         }, ct);
 
         _logger.LogInformation(
-            "RestoreTaskClient: patched task {TaskId} with status '{Status}'",
-            taskId, patch.Status);
+            "AgentTaskClient: patched task {TaskId} with status '{Status}'", taskId, patch.Status);
     }
 
-    public async Task ReportProgressAsync(Guid taskId, RestoreProgressDto progress, CancellationToken ct)
+    public async Task ReportProgressAsync(Guid taskId, AgentTaskProgressDto progress, CancellationToken ct)
     {
         if (!IsConfigured()) return;
 
-        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/restore-task/{taskId}/progress";
+        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/task/{taskId}/progress";
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
@@ -122,8 +120,8 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
         using var response = await _http.SendAsync(request, timeoutCts.Token);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            _authGuard.OnUnauthorized($"{nameof(RestoreTaskClient)}.{nameof(ReportProgressAsync)}", _logger);
-            throw new DashboardUnauthorizedException($"{nameof(RestoreTaskClient)}.{nameof(ReportProgressAsync)}");
+            _authGuard.OnUnauthorized($"{nameof(AgentTaskClient)}.{nameof(ReportProgressAsync)}", _logger);
+            throw new DashboardUnauthorizedException($"{nameof(AgentTaskClient)}.{nameof(ReportProgressAsync)}");
         }
         response.EnsureSuccessStatusCode();
     }
@@ -134,7 +132,7 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
             return true;
 
         _logger.LogWarning(
-            "RestoreTaskClient: AgentSettings.Token or DashboardUrl is not configured. Restore polling is disabled.");
+            "AgentTaskClient: AgentSettings.Token or DashboardUrl is not configured. Task polling is disabled.");
         return false;
     }
 
@@ -155,7 +153,7 @@ public sealed class RestoreTaskClient : IRestoreTaskClient
                 OnRetry = args =>
                 {
                     _logger.LogWarning(
-                        "RestoreTaskClient: PATCH retry {Attempt}/3. Error: {Message}",
+                        "AgentTaskClient: PATCH retry {Attempt}/3. Error: {Message}",
                         args.AttemptNumber + 1, args.Outcome.Exception?.Message);
                     return ValueTask.CompletedTask;
                 },

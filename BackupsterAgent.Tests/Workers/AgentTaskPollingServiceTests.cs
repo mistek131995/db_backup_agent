@@ -6,76 +6,74 @@ using BackupsterAgent.Workers;
 namespace BackupsterAgent.Tests.Workers;
 
 [TestFixture]
-public sealed class RestoreTaskPollingServiceTests
+public sealed class AgentTaskPollingServiceTests
 {
     [Test]
     public void CombineResults_DbSuccessFilesSuccess_OverallSuccess()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Success(),
             FileRestoreResult.Success(3));
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Success));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
-            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Success));
+            Assert.That(patch.Status, Is.EqualTo(AgentTaskStatus.Success));
+            Assert.That(patch.Restore!.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.Restore!.FilesStatus, Is.EqualTo(RestoreFilesStatus.Success));
             Assert.That(patch.ErrorMessage, Is.Null);
-            Assert.That(patch.FilesRestoredCount, Is.EqualTo(3));
-            Assert.That(patch.FilesFailedCount, Is.Null);
+            Assert.That(patch.Restore!.FilesRestoredCount, Is.EqualTo(3));
+            Assert.That(patch.Restore!.FilesFailedCount, Is.Null);
         });
     }
 
     [Test]
     public void CombineResults_DbSuccessFilesSkipped_OverallSuccess()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Success(),
             FileRestoreResult.Skipped());
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Success));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
-            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Skipped));
+            Assert.That(patch.Status, Is.EqualTo(AgentTaskStatus.Success));
+            Assert.That(patch.Restore!.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.Restore!.FilesStatus, Is.EqualTo(RestoreFilesStatus.Skipped));
             Assert.That(patch.ErrorMessage, Is.Null);
-            Assert.That(patch.FilesRestoredCount, Is.Null);
-            Assert.That(patch.FilesFailedCount, Is.Null);
+            Assert.That(patch.Restore!.FilesRestoredCount, Is.Null);
+            Assert.That(patch.Restore!.FilesFailedCount, Is.Null);
         });
     }
 
     [Test]
     public void CombineResults_DbSuccessFilesPartial_OverallPartialWithFilesError()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Success(),
             FileRestoreResult.Partial(restored: 5, failed: 2, errorMessage: "f-err"));
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Partial));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
-            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Partial));
+            Assert.That(patch.Status, Is.EqualTo(AgentTaskStatus.Partial));
+            Assert.That(patch.Restore!.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.Restore!.FilesStatus, Is.EqualTo(RestoreFilesStatus.Partial));
             Assert.That(patch.ErrorMessage, Is.EqualTo("f-err"));
-            Assert.That(patch.FilesRestoredCount, Is.EqualTo(5));
-            Assert.That(patch.FilesFailedCount, Is.EqualTo(2));
+            Assert.That(patch.Restore!.FilesRestoredCount, Is.EqualTo(5));
+            Assert.That(patch.Restore!.FilesFailedCount, Is.EqualTo(2));
         });
     }
 
     [Test]
     public void CombineResults_DbSuccessFilesFailed_OverallIsPartialBecauseDbRestored()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Success(),
             FileRestoreResult.Failed("f-err"));
 
         Assert.Multiple(() =>
         {
-            // "files=failed" while the DB was restored is reported as overall=partial,
-            // not failed — the DB state is valid and the operator needs to know that.
-            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Partial));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
-            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Failed));
+            Assert.That(patch.Status, Is.EqualTo(AgentTaskStatus.Partial));
+            Assert.That(patch.Restore!.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Success));
+            Assert.That(patch.Restore!.FilesStatus, Is.EqualTo(RestoreFilesStatus.Failed));
             Assert.That(patch.ErrorMessage, Is.EqualTo("f-err"));
         });
     }
@@ -83,32 +81,32 @@ public sealed class RestoreTaskPollingServiceTests
     [Test]
     public void CombineResults_DbFailedFilesSuccess_OverallFailed()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Failed("db-err"),
             FileRestoreResult.Success(4));
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Failed));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Failed));
-            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Success));
+            Assert.That(patch.Status, Is.EqualTo(AgentTaskStatus.Failed));
+            Assert.That(patch.Restore!.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Failed));
+            Assert.That(patch.Restore!.FilesStatus, Is.EqualTo(RestoreFilesStatus.Success));
             Assert.That(patch.ErrorMessage, Is.EqualTo("db-err"));
-            Assert.That(patch.FilesRestoredCount, Is.EqualTo(4));
+            Assert.That(patch.Restore!.FilesRestoredCount, Is.EqualTo(4));
         });
     }
 
     [Test]
     public void CombineResults_DbFailedFilesFailed_OverallFailedBothMessagesJoined()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Failed("db-err"),
             FileRestoreResult.Failed("f-err"));
 
         Assert.Multiple(() =>
         {
-            Assert.That(patch.Status, Is.EqualTo(RestoreTaskStatus.Failed));
-            Assert.That(patch.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Failed));
-            Assert.That(patch.FilesStatus, Is.EqualTo(RestoreFilesStatus.Failed));
+            Assert.That(patch.Status, Is.EqualTo(AgentTaskStatus.Failed));
+            Assert.That(patch.Restore!.DatabaseStatus, Is.EqualTo(RestoreDatabaseStatus.Failed));
+            Assert.That(patch.Restore!.FilesStatus, Is.EqualTo(RestoreFilesStatus.Failed));
             Assert.That(patch.ErrorMessage, Is.EqualTo("db-err\n\nf-err"));
         });
     }
@@ -116,22 +114,21 @@ public sealed class RestoreTaskPollingServiceTests
     [Test]
     public void CombineResults_ZeroRestoredCount_EmittedAsNullNotZero()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Success(),
             FileRestoreResult.Success(0));
 
         Assert.Multiple(() =>
         {
-            // Zero must not overwrite the server-side counter; PATCH sends null.
-            Assert.That(patch.FilesRestoredCount, Is.Null);
-            Assert.That(patch.FilesFailedCount, Is.Null);
+            Assert.That(patch.Restore!.FilesRestoredCount, Is.Null);
+            Assert.That(patch.Restore!.FilesFailedCount, Is.Null);
         });
     }
 
     [Test]
     public void CombineResults_OnlyDbError_UsedAsErrorMessage()
     {
-        var patch = RestoreTaskPollingService.CombineResults(
+        var patch = AgentTaskPollingService.CombineResults(
             DatabaseRestoreResult.Failed("only-db"),
             FileRestoreResult.Success(1));
 
@@ -141,34 +138,34 @@ public sealed class RestoreTaskPollingServiceTests
     [Test]
     public void ValidateTaskNames_ValidSourceOnly_ReturnsNull()
     {
-        var task = new RestoreTaskForAgentDto { SourceDatabaseName = "mydb" };
-        Assert.That(RestoreTaskPollingService.ValidateTaskNames(task), Is.Null);
+        var payload = new RestoreTaskPayload { SourceDatabaseName = "mydb" };
+        Assert.That(AgentTaskPollingService.ValidateTaskNames(payload), Is.Null);
     }
 
     [Test]
     public void ValidateTaskNames_ValidSourceAndTarget_ReturnsNull()
     {
-        var task = new RestoreTaskForAgentDto
+        var payload = new RestoreTaskPayload
         {
             SourceDatabaseName = "mydb",
             TargetDatabaseName = "mydb_restore",
         };
-        Assert.That(RestoreTaskPollingService.ValidateTaskNames(task), Is.Null);
+        Assert.That(AgentTaskPollingService.ValidateTaskNames(payload), Is.Null);
     }
 
     [Test]
     public void ValidateTaskNames_EmptySource_ReturnsError()
     {
-        var task = new RestoreTaskForAgentDto { SourceDatabaseName = "" };
-        var error = RestoreTaskPollingService.ValidateTaskNames(task);
+        var payload = new RestoreTaskPayload { SourceDatabaseName = "" };
+        var error = AgentTaskPollingService.ValidateTaskNames(payload);
         Assert.That(error, Does.Contain("исходной БД"));
     }
 
     [Test]
     public void ValidateTaskNames_BadCharInSource_ReturnsError()
     {
-        var task = new RestoreTaskForAgentDto { SourceDatabaseName = "foo'; DROP" };
-        var error = RestoreTaskPollingService.ValidateTaskNames(task);
+        var payload = new RestoreTaskPayload { SourceDatabaseName = "foo'; DROP" };
+        var error = AgentTaskPollingService.ValidateTaskNames(payload);
         Assert.That(error, Does.Contain("исходной БД"));
         Assert.That(error, Does.Contain("недопустимый символ"));
     }
@@ -176,23 +173,23 @@ public sealed class RestoreTaskPollingServiceTests
     [Test]
     public void ValidateTaskNames_BadCharInTarget_ReturnsError()
     {
-        var task = new RestoreTaskForAgentDto
+        var payload = new RestoreTaskPayload
         {
             SourceDatabaseName = "mydb",
             TargetDatabaseName = "../etc/passwd",
         };
-        var error = RestoreTaskPollingService.ValidateTaskNames(task);
+        var error = AgentTaskPollingService.ValidateTaskNames(payload);
         Assert.That(error, Does.Contain("целевой БД"));
     }
 
     [Test]
     public void ValidateTaskNames_NullTarget_IgnoredAsOptional()
     {
-        var task = new RestoreTaskForAgentDto
+        var payload = new RestoreTaskPayload
         {
             SourceDatabaseName = "mydb",
             TargetDatabaseName = null,
         };
-        Assert.That(RestoreTaskPollingService.ValidateTaskNames(task), Is.Null);
+        Assert.That(AgentTaskPollingService.ValidateTaskNames(payload), Is.Null);
     }
 }

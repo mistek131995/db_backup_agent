@@ -23,7 +23,6 @@ public sealed class BackupJob
     private readonly ManifestStore _manifestStore;
     private readonly IBackupRecordClient _recordClient;
     private readonly IProgressReporterFactory _reporterFactory;
-    private readonly IAgentActivityLock _activityLock;
     private readonly AgentSettings _agentSettings;
     private readonly ActivitySource _activitySource;
     private readonly ILogger<BackupJob> _logger;
@@ -38,7 +37,6 @@ public sealed class BackupJob
         ManifestStore manifestStore,
         IBackupRecordClient recordClient,
         IProgressReporterFactory reporterFactory,
-        IAgentActivityLock activityLock,
         IOptions<AgentSettings> agentSettings,
         ActivitySource activitySource,
         ILogger<BackupJob> logger)
@@ -52,7 +50,6 @@ public sealed class BackupJob
         _manifestStore = manifestStore;
         _recordClient = recordClient;
         _reporterFactory = reporterFactory;
-        _activityLock = activityLock;
         _agentSettings = agentSettings.Value;
         _activitySource = activitySource;
         _logger = logger;
@@ -60,8 +57,6 @@ public sealed class BackupJob
 
     public async Task<BackupResult> RunAsync(DatabaseConfig config, CancellationToken ct)
     {
-        using var _ = await _activityLock.AcquireAsync($"backup:{config.Database}", ct);
-
         using var activity = _activitySource.StartActivity("backup.run");
         activity?.SetTag("database", config.Database);
         activity?.SetTag("connection", config.ConnectionName);
@@ -137,6 +132,7 @@ public sealed class BackupJob
                 DurationMs = dumpResult.DurationMs,
                 Success = true,
                 DumpObjectKey = dumpObjectKey,
+                BackupRecordId = recordId.Value,
             };
 
             _logger.LogInformation(
@@ -147,13 +143,23 @@ public sealed class BackupJob
         catch (OperationCanceledException)
         {
             _logger.LogWarning("BackupJob cancelled mid-pipeline for '{Database}'", config.Database);
-            result = new BackupResult { Success = false, ErrorMessage = "Бэкап прерван: агент остановлен." };
+            result = new BackupResult
+            {
+                Success = false,
+                ErrorMessage = "Бэкап прерван: агент остановлен.",
+                BackupRecordId = recordId.Value,
+            };
             cancelled = true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "BackupJob failed");
-            result = new BackupResult { Success = false, ErrorMessage = ex.Message };
+            result = new BackupResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message,
+                BackupRecordId = recordId.Value,
+            };
         }
         finally
         {

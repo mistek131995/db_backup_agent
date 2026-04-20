@@ -1,4 +1,5 @@
 using BackupsterAgent.Configuration;
+using BackupsterAgent.Domain;
 using BackupsterAgent.Services;
 using BackupsterAgent.Services.Backup;
 using BackupsterAgent.Services.Common;
@@ -15,6 +16,8 @@ public sealed class BackupWorker : BackgroundService
     private readonly EncryptionService _encryption;
     private readonly ConnectionResolver _connections;
     private readonly StorageResolver _storages;
+    private readonly IAgentActivityLock _activityLock;
+    private readonly IBackupRunTracker _runTracker;
     private readonly List<DatabaseConfig> _databases;
     private readonly List<DatabaseConfig> _validDatabases;
     private readonly ILogger<BackupWorker> _logger;
@@ -25,6 +28,8 @@ public sealed class BackupWorker : BackgroundService
         EncryptionService encryption,
         ConnectionResolver connections,
         StorageResolver storages,
+        IAgentActivityLock activityLock,
+        IBackupRunTracker runTracker,
         IOptions<List<DatabaseConfig>> databases,
         ILogger<BackupWorker> logger)
     {
@@ -33,6 +38,8 @@ public sealed class BackupWorker : BackgroundService
         _encryption = encryption;
         _connections = connections;
         _storages = storages;
+        _activityLock = activityLock;
+        _runTracker = runTracker;
         _databases = databases.Value;
         _logger = logger;
         _validDatabases = FilterValidDatabases(_databases, _connections, _storages, _logger);
@@ -114,8 +121,6 @@ public sealed class BackupWorker : BackgroundService
             _connections.Names.Count, _databases.Count, _validDatabases.Count,
             TickInterval.TotalSeconds, ScheduleService.PollInterval.TotalMinutes);
 
-        var lastRunByDb = new Dictionary<string, DateTime?>(StringComparer.Ordinal);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -135,11 +140,11 @@ public sealed class BackupWorker : BackgroundService
                         continue;
                     }
 
-                    var last = lastRunByDb.GetValueOrDefault(config.Database);
+                    var last = _runTracker.GetLastRun(config.Database);
                     if (nextRun.Value <= DateTime.UtcNow && (last is null || nextRun.Value > last))
                     {
                         due.Add((config, nextRun.Value));
-                        lastRunByDb[config.Database] = nextRun.Value;
+                        _runTracker.RecordRun(config.Database, nextRun.Value);
                     }
                     else
                     {
@@ -196,7 +201,11 @@ public sealed class BackupWorker : BackgroundService
 
             try
             {
-                var result = await _job.RunAsync(config, stoppingToken);
+                BackupResult result;
+                using (await _activityLock.AcquireAsync($"backup:{config.Database}", stoppingToken))
+                {
+                    result = await _job.RunAsync(config, stoppingToken);
+                }
 
                 if (result.Success)
                 {

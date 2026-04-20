@@ -87,8 +87,49 @@ public sealed class SftpUploadService : IUploadService
     public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
         throw new NotSupportedException("ListAsync is not supported for SFTP provider. Chunk GC requires S3.");
 
-    public Task DeleteAsync(string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("DeleteAsync is not supported for SFTP provider. Chunk GC requires S3.");
+    public async Task DeleteAsync(string objectKey, CancellationToken ct)
+    {
+        var remotePath = $"{_settings.RemotePath.TrimEnd('/')}/{objectKey.TrimStart('/')}";
+
+        _logger.LogInformation(
+            "SFTP deleting {Host}:{RemotePath}", _settings.Host, remotePath);
+
+        using var client = BuildClient();
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                client.Connect();
+
+                using var reg = ct.Register(() =>
+                {
+                    try { client.Disconnect(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "SFTP disconnect on cancel failed (best-effort)"); }
+                });
+
+                try
+                {
+                    client.DeleteFile(remotePath);
+                }
+                catch (SftpPathNotFoundException)
+                {
+                    _logger.LogDebug(
+                        "SFTP DeleteAsync: {RemotePath} not found — treating as already-deleted", remotePath);
+                }
+
+                ct.ThrowIfCancellationRequested();
+                client.Disconnect();
+            }, ct);
+        }
+        catch (Exception ex) when (ct.IsCancellationRequested && ex is not OperationCanceledException)
+        {
+            throw new OperationCanceledException("SFTP delete cancelled by stoppingToken.", ex, ct);
+        }
+
+        _logger.LogInformation("SFTP delete completed. RemotePath: '{RemotePath}'", remotePath);
+    }
 
     private SftpClient BuildClient()
     {
