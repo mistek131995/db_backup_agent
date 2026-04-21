@@ -1,32 +1,14 @@
 using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using BackupsterAgent.Contracts;
 using BackupsterAgent.Settings;
 using Microsoft.Extensions.Options;
 using Polly;
-using Polly.Retry;
 
 namespace BackupsterAgent.Services.Dashboard;
 
-public sealed class BackupRecordClient : IBackupRecordClient
+public sealed class BackupRecordClient : DashboardClientBase, IBackupRecordClient
 {
-    private static readonly TimeSpan[] RetryDelays =
-    [
-        TimeSpan.FromSeconds(1),
-        TimeSpan.FromSeconds(2),
-        TimeSpan.FromSeconds(4),
-    ];
-
-    private static readonly JsonSerializerOptions JsonOptions =
-        new(JsonSerializerDefaults.Web)
-        {
-            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-        };
-
     private readonly HttpClient _http;
-    private readonly AgentSettings _settings;
-    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<BackupRecordClient> _logger;
     private readonly ResiliencePipeline _retryPipeline;
 
@@ -35,30 +17,30 @@ public sealed class BackupRecordClient : IBackupRecordClient
         IOptions<AgentSettings> settings,
         IDashboardAuthGuard authGuard,
         ILogger<BackupRecordClient> logger)
+        : base(settings.Value, authGuard)
     {
         _http = http;
-        _settings = settings.Value;
-        _authGuard = authGuard;
         _logger = logger;
-        _retryPipeline = BuildRetryPipeline();
+        _retryPipeline = BuildRetryPipeline(nameof(BackupRecordClient), logger);
     }
 
     public async Task<OpenRecordResult> OpenAsync(OpenBackupRecordDto dto, CancellationToken ct)
     {
-        if (!IsConfigured()) return new OpenRecordResult(DashboardAvailability.PermanentSkip);
+        if (!IsConfigured(_logger, nameof(BackupRecordClient)))
+            return new OpenRecordResult(DashboardAvailability.PermanentSkip);
 
-        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record";
+        var url = $"{Settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record";
 
         try
         {
             var response = await _retryPipeline.ExecuteAsync(async innerCt =>
             {
                 using var request = new HttpRequestMessage(HttpMethod.Post, url);
-                request.Headers.Add("X-Agent-Token", _settings.Token);
+                request.Headers.Add("X-Agent-Token", Settings.Token);
                 request.Content = JsonContent.Create(dto, options: JsonOptions);
 
                 var resp = await _http.SendAsync(request, innerCt);
-                ThrowIfUnauthorized(resp, nameof(OpenAsync));
+                ThrowIfUnauthorized(resp, $"{nameof(BackupRecordClient)}.{nameof(OpenAsync)}", _logger);
                 return resp;
             }, ct);
 
@@ -71,8 +53,7 @@ public sealed class BackupRecordClient : IBackupRecordClient
                     return new OpenRecordResult(availability);
                 }
 
-                var body = await response.Content.ReadFromJsonAsync<OpenBackupRecordResponseDto>(
-                    JsonOptions, ct);
+                var body = await response.Content.ReadFromJsonAsync<OpenBackupRecordResponseDto>(JsonOptions, ct);
 
                 if (body is null || body.Id == Guid.Empty)
                 {
@@ -102,28 +83,29 @@ public sealed class BackupRecordClient : IBackupRecordClient
 
     public async Task ReportProgressAsync(Guid backupRecordId, BackupProgressDto progress, CancellationToken ct)
     {
-        if (!IsConfigured()) return;
+        if (!IsConfigured(_logger, nameof(BackupRecordClient))) return;
 
-        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record/{backupRecordId}/progress";
+        var url = $"{Settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record/{backupRecordId}/progress";
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Headers.Add("X-Agent-Token", _settings.Token);
+        request.Headers.Add("X-Agent-Token", Settings.Token);
         request.Content = JsonContent.Create(progress, options: JsonOptions);
 
         using var response = await _http.SendAsync(request, timeoutCts.Token);
-        ThrowIfUnauthorized(response, nameof(ReportProgressAsync));
+        ThrowIfUnauthorized(response, $"{nameof(BackupRecordClient)}.{nameof(ReportProgressAsync)}", _logger);
         response.EnsureSuccessStatusCode();
     }
 
     public async Task<FinalizeRecordResult> FinalizeAsync(
         Guid backupRecordId, FinalizeBackupRecordDto dto, CancellationToken ct)
     {
-        if (!IsConfigured()) return new FinalizeRecordResult(DashboardAvailability.PermanentSkip);
+        if (!IsConfigured(_logger, nameof(BackupRecordClient)))
+            return new FinalizeRecordResult(DashboardAvailability.PermanentSkip);
 
-        var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record/{backupRecordId}";
+        var url = $"{Settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record/{backupRecordId}";
 
         try
         {
@@ -132,11 +114,11 @@ public sealed class BackupRecordClient : IBackupRecordClient
             await _retryPipeline.ExecuteAsync(async innerCt =>
             {
                 using var request = new HttpRequestMessage(HttpMethod.Patch, url);
-                request.Headers.Add("X-Agent-Token", _settings.Token);
+                request.Headers.Add("X-Agent-Token", Settings.Token);
                 request.Content = JsonContent.Create(dto, options: JsonOptions);
 
                 using var response = await _http.SendAsync(request, innerCt);
-                ThrowIfUnauthorized(response, nameof(FinalizeAsync));
+                ThrowIfUnauthorized(response, $"{nameof(BackupRecordClient)}.{nameof(FinalizeAsync)}", _logger);
 
                 availability = DashboardAvailabilityPolicy.ClassifyResponse(response);
                 if (availability == DashboardAvailability.OfflineRetryable)
@@ -170,23 +152,6 @@ public sealed class BackupRecordClient : IBackupRecordClient
         }
     }
 
-    private bool IsConfigured()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.Token) && !string.IsNullOrWhiteSpace(_settings.DashboardUrl))
-            return true;
-
-        _logger.LogWarning(
-            "BackupRecordClient: AgentSettings.Token or DashboardUrl is not configured. Dashboard reporting is disabled.");
-        return false;
-    }
-
-    private void ThrowIfUnauthorized(HttpResponseMessage response, string channel)
-    {
-        if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized) return;
-        _authGuard.OnUnauthorized($"{nameof(BackupRecordClient)}.{channel}", _logger);
-        throw new DashboardUnauthorizedException($"{nameof(BackupRecordClient)}.{channel}");
-    }
-
     private void LogNonOk(string channel, string subject, DashboardAvailability availability, System.Net.HttpStatusCode? status)
     {
         _logger.LogWarning(
@@ -194,28 +159,4 @@ public sealed class BackupRecordClient : IBackupRecordClient
             channel, subject, availability,
             status.HasValue ? $" (HTTP {(int)status.Value})" : string.Empty);
     }
-
-    private ResiliencePipeline BuildRetryPipeline() =>
-        new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
-            {
-                MaxRetryAttempts = 3,
-                ShouldHandle = args => ValueTask.FromResult(
-                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
-                DelayGenerator = args =>
-                {
-                    var delay = args.AttemptNumber < RetryDelays.Length
-                        ? RetryDelays[args.AttemptNumber]
-                        : RetryDelays[^1];
-                    return ValueTask.FromResult<TimeSpan?>(delay);
-                },
-                OnRetry = args =>
-                {
-                    _logger.LogWarning(
-                        "BackupRecordClient: retry {Attempt}/3. Error: {Message}",
-                        args.AttemptNumber + 1, args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                },
-            })
-            .Build();
 }

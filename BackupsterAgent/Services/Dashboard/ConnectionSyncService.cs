@@ -1,38 +1,19 @@
-using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using BackupsterAgent.Contracts;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Settings;
 using Microsoft.Extensions.Options;
 using Polly;
-using Polly.Retry;
 
 namespace BackupsterAgent.Services.Dashboard;
 
-public sealed class ConnectionSyncService : IConnectionSyncService
+public sealed class ConnectionSyncService : DashboardClientBase, IConnectionSyncService
 {
-    private static readonly JsonSerializerOptions JsonOptions =
-        new(JsonSerializerDefaults.Web)
-        {
-            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-        };
-
     private readonly HttpClient _http;
     private readonly ConnectionResolver _connections;
-    private readonly AgentSettings _settings;
-    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<ConnectionSyncService> _logger;
     private readonly ResiliencePipeline _pipeline;
     private readonly SemaphoreSlim _gate = new(1, 1);
-
-    private static readonly TimeSpan[] RetryDelays =
-    [
-        TimeSpan.FromSeconds(1),
-        TimeSpan.FromSeconds(2),
-        TimeSpan.FromSeconds(4),
-    ];
 
     public ConnectionSyncService(
         HttpClient http,
@@ -40,29 +21,23 @@ public sealed class ConnectionSyncService : IConnectionSyncService
         IOptions<AgentSettings> settings,
         IDashboardAuthGuard authGuard,
         ILogger<ConnectionSyncService> logger)
+        : base(settings.Value, authGuard)
     {
         _http = http;
         _connections = connections;
-        _settings = settings.Value;
-        _authGuard = authGuard;
         _logger = logger;
-        _pipeline = BuildPipeline();
+        _pipeline = BuildRetryPipeline(nameof(ConnectionSyncService), logger);
     }
 
     public async Task<bool> SyncAsync(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_settings.Token) || string.IsNullOrWhiteSpace(_settings.DashboardUrl))
-        {
-            _logger.LogWarning(
-                "ConnectionSyncService: skipping sync — AgentSettings.Token or DashboardUrl is not configured.");
-            return false;
-        }
+        if (!IsConfigured(_logger, nameof(ConnectionSyncService))) return false;
 
         await _gate.WaitAsync(ct);
         try
         {
             var payload = BuildPayload();
-            var tokenHint = _settings.Token.Length >= 8 ? _settings.Token[..8] : _settings.Token;
+            var tokenHint = Settings.Token.Length >= 8 ? Settings.Token[..8] : Settings.Token;
 
             if (payload.Connections.Count == 0)
             {
@@ -79,18 +54,14 @@ public sealed class ConnectionSyncService : IConnectionSyncService
             {
                 await _pipeline.ExecuteAsync(async innerCt =>
                 {
-                    var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/connections";
+                    var url = $"{Settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/connections";
 
                     using var request = new HttpRequestMessage(HttpMethod.Post, url);
-                    request.Headers.Add("X-Agent-Token", _settings.Token);
+                    request.Headers.Add("X-Agent-Token", Settings.Token);
                     request.Content = JsonContent.Create(payload, options: JsonOptions);
 
                     var response = await _http.SendAsync(request, innerCt);
-                    if (response.StatusCode == HttpStatusCode.Unauthorized)
-                    {
-                        _authGuard.OnUnauthorized($"{nameof(ConnectionSyncService)}.{nameof(SyncAsync)}", _logger);
-                        throw new DashboardUnauthorizedException($"{nameof(ConnectionSyncService)}.{nameof(SyncAsync)}");
-                    }
+                    ThrowIfUnauthorized(response, $"{nameof(ConnectionSyncService)}.{nameof(SyncAsync)}", _logger);
                     response.EnsureSuccessStatusCode();
                 }, ct);
 
@@ -147,30 +118,4 @@ public sealed class ConnectionSyncService : IConnectionSyncService
 
         return new ConnectionSyncRequestDto { Connections = items };
     }
-
-    private ResiliencePipeline BuildPipeline() =>
-        new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
-            {
-                MaxRetryAttempts = 3,
-                ShouldHandle = args => ValueTask.FromResult(
-                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
-                DelayGenerator = args =>
-                {
-                    var delay = args.AttemptNumber < RetryDelays.Length
-                        ? RetryDelays[args.AttemptNumber]
-                        : RetryDelays[^1];
-                    return ValueTask.FromResult<TimeSpan?>(delay);
-                },
-                OnRetry = args =>
-                {
-                    _logger.LogWarning(
-                        "ConnectionSyncService: retry attempt {Attempt}/3, delay {DelaySeconds}s. Error: {Message}",
-                        args.AttemptNumber + 1,
-                        RetryDelays[Math.Min(args.AttemptNumber, RetryDelays.Length - 1)].TotalSeconds,
-                        args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                },
-            })
-            .Build();
 }

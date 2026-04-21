@@ -1,32 +1,21 @@
-using System.Net;
 using System.Net.Http.Json;
 using BackupsterAgent.Contracts;
 using BackupsterAgent.Settings;
 using Microsoft.Extensions.Options;
 using NCrontab;
 using Polly;
-using Polly.Retry;
 
 namespace BackupsterAgent.Services.Dashboard;
 
-public sealed class ScheduleService
+public sealed class ScheduleService : DashboardClientBase
 {
     private readonly HttpClient _http;
-    private readonly AgentSettings _settings;
-    private readonly IDashboardAuthGuard _authGuard;
     private readonly ILogger<ScheduleService> _logger;
     private readonly ResiliencePipeline _pipeline;
 
     public static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(5);
 
     private const string DefaultKey = "__default__";
-
-    private static readonly TimeSpan[] RetryDelays =
-    [
-        TimeSpan.FromSeconds(1),
-        TimeSpan.FromSeconds(2),
-        TimeSpan.FromSeconds(4),
-    ];
 
     private ScheduleDto? _cachedSchedule;
     private DateTime _lastFetchAt = DateTime.MinValue;
@@ -37,12 +26,11 @@ public sealed class ScheduleService
         IOptions<AgentSettings> settings,
         IDashboardAuthGuard authGuard,
         ILogger<ScheduleService> logger)
+        : base(settings.Value, authGuard)
     {
         _http = http;
-        _settings = settings.Value;
-        _authGuard = authGuard;
         _logger = logger;
-        _pipeline = BuildPipeline();
+        _pipeline = BuildRetryPipeline(nameof(ScheduleService), logger);
     }
 
     public async Task<DateTime?> GetNextRunAsync(string databaseName, CancellationToken ct)
@@ -67,7 +55,7 @@ public sealed class ScheduleService
 
     private async Task RefreshScheduleAsync(CancellationToken ct)
     {
-        if (!IsConfigured())
+        if (!IsConfigured(_logger, nameof(ScheduleService)))
         {
             _lastFetchAt = DateTime.UtcNow;
             return;
@@ -79,17 +67,13 @@ public sealed class ScheduleService
 
             await _pipeline.ExecuteAsync(async innerCt =>
             {
-                var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/schedule";
+                var url = $"{Settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/schedule";
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Add("X-Agent-Token", _settings.Token);
+                request.Headers.Add("X-Agent-Token", Settings.Token);
 
                 var response = await _http.SendAsync(request, innerCt);
-                if (response.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    _authGuard.OnUnauthorized($"{nameof(ScheduleService)}.{nameof(RefreshScheduleAsync)}", _logger);
-                    throw new DashboardUnauthorizedException($"{nameof(ScheduleService)}.{nameof(RefreshScheduleAsync)}");
-                }
+                ThrowIfUnauthorized(response, $"{nameof(ScheduleService)}.{nameof(RefreshScheduleAsync)}", _logger);
                 response.EnsureSuccessStatusCode();
                 fetched = await response.Content.ReadFromJsonAsync<ScheduleDto>(innerCt);
             }, ct);
@@ -107,16 +91,6 @@ public sealed class ScheduleService
             _logger.LogWarning(ex,
                 "ScheduleService: failed to fetch schedule from server. Using last known schedule.");
         }
-    }
-
-    private bool IsConfigured()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.Token) && !string.IsNullOrWhiteSpace(_settings.DashboardUrl))
-            return true;
-
-        _logger.LogWarning(
-            "ScheduleService: AgentSettings.Token or DashboardUrl is not configured. Schedule fetching is disabled.");
-        return false;
     }
 
     private void LogCronChanges(ScheduleDto fetched)
@@ -173,30 +147,4 @@ public sealed class ScheduleService
             return null;
         }
     }
-
-    private ResiliencePipeline BuildPipeline() =>
-        new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
-            {
-                MaxRetryAttempts = 3,
-                ShouldHandle = args => ValueTask.FromResult(
-                    args.Outcome.Exception is not null and not DashboardUnauthorizedException),
-                DelayGenerator = args =>
-                {
-                    var delay = args.AttemptNumber < RetryDelays.Length
-                        ? RetryDelays[args.AttemptNumber]
-                        : RetryDelays[^1];
-                    return ValueTask.FromResult<TimeSpan?>(delay);
-                },
-                OnRetry = args =>
-                {
-                    _logger.LogWarning(
-                        "ScheduleService: retry attempt {Attempt}/3, delay {DelaySeconds}s. Error: {Message}",
-                        args.AttemptNumber + 1,
-                        RetryDelays[Math.Min(args.AttemptNumber, RetryDelays.Length - 1)].TotalSeconds,
-                        args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                },
-            })
-            .Build();
 }

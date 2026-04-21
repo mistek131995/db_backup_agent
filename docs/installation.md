@@ -22,16 +22,20 @@
 
 ```bash
 docker run -d --name backupster-agent \
+  --restart unless-stopped \
   -e AgentSettings__Token=<токен> \
   -e AgentSettings__DashboardUrl=<url дашборда> \
   -v /root/backupster-agent:/app/config \
   ghcr.io/mistek131995/backupster-agent:latest
 ```
 
+Volume `/root/backupster-agent:/app/config` сохраняет конфиг, расписание запусков (`runs/`) и очередь offline-бэкапов (`outbox/`). Без него данные пропадут при пересоздании контейнера.
+
 Если планируете использовать файловый бэкап (`FilePaths`), смонтируйте исходные директории в контейнер отдельными томами и пропишите их контейнерные пути в `FilePaths`:
 
 ```bash
 docker run -d --name backupster-agent \
+  --restart unless-stopped \
   -e AgentSettings__Token=<токен> \
   -e AgentSettings__DashboardUrl=<url дашборда> \
   -v /root/backupster-agent:/app/config \
@@ -77,7 +81,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now backupster-agent
 ```
 
-При первом запуске агент создаст шаблон `/app/config/appsettings.json`. Заполните его и перезапустите службу:
+При первом запуске агент создаст шаблон `/opt/backupster-agent/config/appsettings.json`. Заполните его и перезапустите службу:
 
 ```bash
 sudo systemctl restart backupster-agent
