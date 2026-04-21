@@ -23,6 +23,7 @@ public sealed class BackupJob
     private readonly ManifestStore _manifestStore;
     private readonly IBackupRecordClient _recordClient;
     private readonly IProgressReporterFactory _reporterFactory;
+    private readonly IOutboxStore _outboxStore;
     private readonly AgentSettings _agentSettings;
     private readonly ActivitySource _activitySource;
     private readonly ILogger<BackupJob> _logger;
@@ -37,6 +38,7 @@ public sealed class BackupJob
         ManifestStore manifestStore,
         IBackupRecordClient recordClient,
         IProgressReporterFactory reporterFactory,
+        IOutboxStore outboxStore,
         IOptions<AgentSettings> agentSettings,
         ActivitySource activitySource,
         ILogger<BackupJob> logger)
@@ -50,6 +52,7 @@ public sealed class BackupJob
         _manifestStore = manifestStore;
         _recordClient = recordClient;
         _reporterFactory = reporterFactory;
+        _outboxStore = outboxStore;
         _agentSettings = agentSettings.Value;
         _activitySource = activitySource;
         _logger = logger;
@@ -66,19 +69,12 @@ public sealed class BackupJob
             "BackupJob starting. Database: '{Database}', Connection: '{Connection}', Storage: '{Storage}', TraceId: {TraceId}",
             config.Database, config.ConnectionName, config.StorageName, activity?.TraceId.ToString() ?? "-");
 
-        var recordId = await _recordClient.OpenAsync(
-            new OpenBackupRecordDto
-            {
-                DatabaseName = config.Database,
-                ConnectionName = config.ConnectionName,
-                StorageName = config.StorageName,
-            }, ct);
+        var startedAt = DateTime.UtcNow;
 
-        if (recordId is null)
+        var openResult = await OpenRecordAsync(config, startedAt, ct);
+
+        if (openResult.Status == DashboardAvailability.PermanentSkip)
         {
-            _logger.LogWarning(
-                "BackupJob: could not open backup record on dashboard for '{Database}'. Skipping this run.",
-                config.Database);
             return new BackupResult
             {
                 Success = false,
@@ -86,7 +82,18 @@ public sealed class BackupJob
             };
         }
 
-        await using var reporter = _reporterFactory.CreateForBackup(recordId.Value);
+        var offline = openResult.Status == DashboardAvailability.OfflineRetryable;
+        var recordId = openResult.Id;
+        string? clientTaskId = offline ? Guid.NewGuid().ToString() : null;
+
+        if (offline)
+        {
+            _logger.LogWarning(
+                "BackupJob: dashboard offline at start for '{Database}' — switching to offline mode (clientTaskId={ClientTaskId})",
+                config.Database, clientTaskId);
+        }
+
+        await using var reporter = _reporterFactory.CreateForBackup(recordId ?? Guid.Empty, offline: offline);
 
         string? dumpFile = null;
         string? encryptedFile = null;
@@ -103,7 +110,7 @@ public sealed class BackupJob
             storage = _storages.Resolve(config.StorageName);
             var provider = _factory.GetProvider(connection.DatabaseType);
             uploader = _uploadFactory.GetService(config.StorageName);
-            backupFolder = $"{config.Database}/{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}";
+            backupFolder = $"{config.Database}/{startedAt:yyyy-MM-dd_HH-mm-ss}";
 
             _logger.LogInformation(
                 "BackupJob resolved. Provider: {ProviderType}, Folder: '{Folder}'",
@@ -132,7 +139,7 @@ public sealed class BackupJob
                 DurationMs = dumpResult.DurationMs,
                 Success = true,
                 DumpObjectKey = dumpObjectKey,
-                BackupRecordId = recordId.Value,
+                BackupRecordId = recordId,
             };
 
             _logger.LogInformation(
@@ -147,7 +154,7 @@ public sealed class BackupJob
             {
                 Success = false,
                 ErrorMessage = "Бэкап прерван: агент остановлен.",
-                BackupRecordId = recordId.Value,
+                BackupRecordId = recordId,
             };
             cancelled = true;
         }
@@ -158,7 +165,7 @@ public sealed class BackupJob
             {
                 Success = false,
                 ErrorMessage = ex.Message,
-                BackupRecordId = recordId.Value,
+                BackupRecordId = recordId,
             };
         }
         finally
@@ -186,26 +193,123 @@ public sealed class BackupJob
                 config, storage, uploader, backupFolder, dumpObjectKey, reporter, ct);
         }
 
-        using var cancelFinalizeCts = cancelled ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) : null;
-        var finalizeCt = cancelled ? cancelFinalizeCts!.Token : ct;
+        var finalizeDto = BuildFinalizeDto(result, fileMetrics, fileError);
 
-        try
+        if (offline)
         {
-            await _recordClient.FinalizeAsync(
-                recordId.Value,
-                BuildFinalizeDto(result, fileMetrics, fileError),
-                finalizeCt);
+            await EnqueueOutboxAsync(
+                clientTaskId!, config, startedAt, finalizeDto, serverRecordId: null, ct);
         }
-        catch (Exception ex) when (cancelled)
+        else
         {
-            _logger.LogError(ex,
-                "BackupJob: could not finalize cancelled record for '{Database}'. Sweeper will close it.",
-                config.Database);
+            var finalizeResult = await FinalizeRecordAsync(
+                recordId!.Value, finalizeDto, ct, cancelled, config.Database);
+
+            if (finalizeResult.Status == DashboardAvailability.OfflineRetryable && !cancelled)
+            {
+                clientTaskId = Guid.NewGuid().ToString();
+                _logger.LogWarning(
+                    "BackupJob: dashboard offline at finalize for '{Database}' — entry queued (clientTaskId={ClientTaskId}, serverRecordId={RecordId})",
+                    config.Database, clientTaskId, recordId);
+                await EnqueueOutboxAsync(
+                    clientTaskId, config, startedAt, finalizeDto, serverRecordId: recordId, ct);
+            }
         }
 
         if (cancelled) throw new OperationCanceledException(ct);
 
         return result;
+    }
+
+    private async Task<OpenRecordResult> OpenRecordAsync(
+        DatabaseConfig config, DateTime startedAt, CancellationToken ct)
+    {
+        var result = await _recordClient.OpenAsync(
+            new OpenBackupRecordDto
+            {
+                DatabaseName = config.Database,
+                ConnectionName = config.ConnectionName,
+                StorageName = config.StorageName,
+                StartedAt = startedAt,
+            }, ct);
+
+        if (result.Status == DashboardAvailability.PermanentSkip)
+        {
+            _logger.LogWarning(
+                "BackupJob: dashboard rejected open for '{Database}' (permanent skip). Run skipped.",
+                config.Database);
+        }
+
+        return result;
+    }
+
+    private async Task<FinalizeRecordResult> FinalizeRecordAsync(
+        Guid recordId,
+        FinalizeBackupRecordDto dto,
+        CancellationToken runCt,
+        bool cancelled,
+        string database)
+    {
+        using var cancelFinalizeCts = cancelled ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) : null;
+        var finalizeCt = cancelled ? cancelFinalizeCts!.Token : runCt;
+
+        try
+        {
+            return await _recordClient.FinalizeAsync(recordId, dto, finalizeCt);
+        }
+        catch (Exception ex) when (cancelled)
+        {
+            _logger.LogError(ex,
+                "BackupJob: could not finalize cancelled record for '{Database}'. Sweeper will close it.",
+                database);
+            return new FinalizeRecordResult(DashboardAvailability.PermanentSkip);
+        }
+    }
+
+    private async Task EnqueueOutboxAsync(
+        string clientTaskId,
+        DatabaseConfig config,
+        DateTime startedAt,
+        FinalizeBackupRecordDto finalizeDto,
+        Guid? serverRecordId,
+        CancellationToken ct)
+    {
+        var entry = new OutboxEntry
+        {
+            ClientTaskId = clientTaskId,
+            DatabaseName = config.Database,
+            ConnectionName = config.ConnectionName,
+            StorageName = config.StorageName,
+            StartedAt = startedAt,
+            BackupAt = finalizeDto.BackupAt,
+            Status = finalizeDto.Status == BackupStatus.Success ? "success" : "failed",
+            SizeBytes = finalizeDto.SizeBytes,
+            DurationMs = finalizeDto.DurationMs,
+            DumpObjectKey = finalizeDto.DumpObjectKey,
+            ErrorMessage = finalizeDto.ErrorMessage,
+            ManifestKey = finalizeDto.ManifestKey,
+            FilesCount = finalizeDto.FilesCount,
+            FilesTotalBytes = finalizeDto.FilesTotalBytes,
+            NewChunksCount = finalizeDto.NewChunksCount,
+            FileBackupError = finalizeDto.FileBackupError,
+            QueuedAt = DateTime.UtcNow,
+            AttemptCount = 0,
+            ServerRecordId = serverRecordId,
+        };
+
+        try
+        {
+            await _outboxStore.EnqueueAsync(entry, ct);
+            _logger.LogInformation(
+                "BackupJob: outbox entry saved (clientTaskId={ClientTaskId}, database={Database}, status={Status}, serverRecordId={ServerId})",
+                clientTaskId, config.Database, entry.Status, serverRecordId?.ToString() ?? "-");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "BackupJob: failed to save outbox entry for '{Database}'. Backup completed but won't be replayed.",
+                config.Database);
+        }
     }
 
     internal async Task<(FileBackupMetrics? Metrics, string? Error)> CaptureFilesSafelyAsync(

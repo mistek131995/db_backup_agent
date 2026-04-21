@@ -37,8 +37,11 @@ public sealed class ProgressReporterFactory : IProgressReporterFactory
             logger);
     }
 
-    public IProgressReporter<BackupStage> CreateForBackup(Guid backupRecordId)
+    public IProgressReporter<BackupStage> CreateForBackup(Guid backupRecordId, bool offline = false)
     {
+        if (offline)
+            return new NullProgressReporter<BackupStage>();
+
         var logger = _loggerFactory.CreateLogger<ProgressReporter<BackupStage>>();
         return new ProgressReporter<BackupStage>(
             (snap, ct) => _backupClient.ReportProgressAsync(backupRecordId, ToDto(snap), ct),

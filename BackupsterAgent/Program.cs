@@ -52,6 +52,9 @@ builder.Services.Configure<GcSettings>(
 builder.Services.Configure<RetentionSettings>(
     builder.Configuration.GetSection("RetentionSettings"));
 
+builder.Services.Configure<OutboxSettings>(
+    builder.Configuration.GetSection("OutboxSettings"));
+
 builder.Services.AddSingleton<PostgresBackupProvider>();
 builder.Services.AddSingleton<MssqlBackupProvider>();
 builder.Services.AddSingleton<MysqlBackupProvider>();
@@ -71,7 +74,17 @@ ActivitySource.AddActivityListener(new ActivityListener
 builder.Services.AddSingleton(new ActivitySource("BackupsterAgent"));
 
 builder.Services.AddSingleton<IAgentActivityLock, AgentActivityLock>();
-builder.Services.AddSingleton<IBackupRunTracker, BackupRunTracker>();
+var runsDir = Path.Combine(configDir, "runs");
+builder.Services.AddSingleton(sp =>
+    new RunStateStore(runsDir, sp.GetRequiredService<ILogger<RunStateStore>>()));
+builder.Services.AddSingleton<IBackupRunTracker>(sp =>
+    new BackupRunTracker(
+        sp.GetRequiredService<RunStateStore>(),
+        sp.GetRequiredService<ILogger<BackupRunTracker>>()));
+
+var outboxDir = Path.Combine(configDir, "outbox");
+builder.Services.AddSingleton<IOutboxStore>(sp =>
+    new OutboxStore(outboxDir, sp.GetRequiredService<ILogger<OutboxStore>>()));
 builder.Services.AddSingleton(sp =>
     new ConnectionResolver(sp.GetRequiredService<IOptions<List<ConnectionConfig>>>().Value));
 builder.Services.AddSingleton(sp =>
@@ -104,6 +117,7 @@ builder.Services.AddHostedService<ConnectionSyncWorker>();
 builder.Services.AddHostedService<AgentTaskPollingService>();
 builder.Services.AddHostedService<ChunkGcWorker>();
 builder.Services.AddHostedService<RetentionWorker>();
+builder.Services.AddHostedService<OutboxReplayWorker>();
 
 var host = builder.Build();
 host.Run();

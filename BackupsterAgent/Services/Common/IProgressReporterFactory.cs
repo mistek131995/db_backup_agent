@@ -8,5 +8,5 @@ public interface IProgressReporterFactory
 
     IProgressReporter<DeleteStage> CreateForDelete(Guid taskId);
 
-    IProgressReporter<BackupStage> CreateForBackup(Guid backupRecordId);
+    IProgressReporter<BackupStage> CreateForBackup(Guid backupRecordId, bool offline = false);
 }

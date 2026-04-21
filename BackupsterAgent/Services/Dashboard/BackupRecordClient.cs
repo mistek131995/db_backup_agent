@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -44,9 +43,9 @@ public sealed class BackupRecordClient : IBackupRecordClient
         _retryPipeline = BuildRetryPipeline();
     }
 
-    public async Task<Guid?> OpenAsync(OpenBackupRecordDto dto, CancellationToken ct)
+    public async Task<OpenRecordResult> OpenAsync(OpenBackupRecordDto dto, CancellationToken ct)
     {
-        if (!IsConfigured()) return null;
+        if (!IsConfigured()) return new OpenRecordResult(DashboardAvailability.PermanentSkip);
 
         var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record";
 
@@ -60,12 +59,18 @@ public sealed class BackupRecordClient : IBackupRecordClient
 
                 var resp = await _http.SendAsync(request, innerCt);
                 ThrowIfUnauthorized(resp, nameof(OpenAsync));
-                resp.EnsureSuccessStatusCode();
                 return resp;
             }, ct);
 
             using (response)
             {
+                var availability = DashboardAvailabilityPolicy.ClassifyResponse(response);
+                if (availability != DashboardAvailability.Ok)
+                {
+                    LogNonOk(nameof(OpenAsync), dto.DatabaseName, availability, response.StatusCode);
+                    return new OpenRecordResult(availability);
+                }
+
                 var body = await response.Content.ReadFromJsonAsync<OpenBackupRecordResponseDto>(
                     JsonOptions, ct);
 
@@ -73,20 +78,25 @@ public sealed class BackupRecordClient : IBackupRecordClient
                 {
                     _logger.LogWarning(
                         "BackupRecordClient: server returned empty body for '{Database}'", dto.DatabaseName);
-                    return null;
+                    return new OpenRecordResult(DashboardAvailability.PermanentSkip);
                 }
 
                 _logger.LogInformation(
                     "BackupRecordClient: opened record {Id} for '{Database}'", body.Id, dto.DatabaseName);
-                return body.Id;
+                return new OpenRecordResult(DashboardAvailability.Ok, body.Id);
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "BackupRecordClient: failed to open record for '{Database}'. Backup for this run is skipped.",
-                dto.DatabaseName);
-            return null;
+            var availability = DashboardAvailabilityPolicy.ClassifyException(ex);
+            _logger.LogWarning(ex,
+                "BackupRecordClient: open failed for '{Database}' — classified as {Availability}",
+                dto.DatabaseName, availability);
+            return new OpenRecordResult(availability);
         }
     }
 
@@ -108,14 +118,17 @@ public sealed class BackupRecordClient : IBackupRecordClient
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task FinalizeAsync(Guid backupRecordId, FinalizeBackupRecordDto dto, CancellationToken ct)
+    public async Task<FinalizeRecordResult> FinalizeAsync(
+        Guid backupRecordId, FinalizeBackupRecordDto dto, CancellationToken ct)
     {
-        if (!IsConfigured()) return;
+        if (!IsConfigured()) return new FinalizeRecordResult(DashboardAvailability.PermanentSkip);
 
         var url = $"{_settings.DashboardUrl.TrimEnd('/')}/api/v1/agent/backup-record/{backupRecordId}";
 
         try
         {
+            var availability = DashboardAvailability.Ok;
+
             await _retryPipeline.ExecuteAsync(async innerCt =>
             {
                 using var request = new HttpRequestMessage(HttpMethod.Patch, url);
@@ -124,18 +137,36 @@ public sealed class BackupRecordClient : IBackupRecordClient
 
                 using var response = await _http.SendAsync(request, innerCt);
                 ThrowIfUnauthorized(response, nameof(FinalizeAsync));
-                response.EnsureSuccessStatusCode();
+
+                availability = DashboardAvailabilityPolicy.ClassifyResponse(response);
+                if (availability == DashboardAvailability.OfflineRetryable)
+                    response.EnsureSuccessStatusCode();
             }, ct);
 
-            _logger.LogInformation(
-                "BackupRecordClient: finalized record {Id} with status '{Status}'",
-                backupRecordId, dto.Status);
+            if (availability == DashboardAvailability.Ok)
+            {
+                _logger.LogInformation(
+                    "BackupRecordClient: finalized record {Id} with status '{Status}'",
+                    backupRecordId, dto.Status);
+            }
+            else
+            {
+                LogNonOk(nameof(FinalizeAsync), backupRecordId.ToString(), availability, status: null);
+            }
+
+            return new FinalizeRecordResult(availability);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "BackupRecordClient: all retry attempts exhausted for record {Id}. Record remains in_progress.",
-                backupRecordId);
+            var availability = DashboardAvailabilityPolicy.ClassifyException(ex);
+            _logger.LogWarning(ex,
+                "BackupRecordClient: finalize failed for record {Id} — classified as {Availability}",
+                backupRecordId, availability);
+            return new FinalizeRecordResult(availability);
         }
     }
 
@@ -151,9 +182,17 @@ public sealed class BackupRecordClient : IBackupRecordClient
 
     private void ThrowIfUnauthorized(HttpResponseMessage response, string channel)
     {
-        if (response.StatusCode != HttpStatusCode.Unauthorized) return;
+        if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized) return;
         _authGuard.OnUnauthorized($"{nameof(BackupRecordClient)}.{channel}", _logger);
         throw new DashboardUnauthorizedException($"{nameof(BackupRecordClient)}.{channel}");
+    }
+
+    private void LogNonOk(string channel, string subject, DashboardAvailability availability, System.Net.HttpStatusCode? status)
+    {
+        _logger.LogWarning(
+            "BackupRecordClient.{Channel}: '{Subject}' classified as {Availability}{Status}",
+            channel, subject, availability,
+            status.HasValue ? $" (HTTP {(int)status.Value})" : string.Empty);
     }
 
     private ResiliencePipeline BuildRetryPipeline() =>

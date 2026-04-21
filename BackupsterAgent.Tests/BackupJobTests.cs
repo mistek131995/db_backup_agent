@@ -168,6 +168,9 @@ public sealed class BackupJobTests
             NullLoggerFactory.Instance,
             NullLogger<ManifestStore>.Instance);
 
+        var outboxRoot = Path.Combine(Path.GetTempPath(), "dbbackup-job-outbox-" + Path.GetRandomFileName());
+        var outboxStore = new OutboxStore(outboxRoot, NullLogger<OutboxStore>.Instance);
+
         return new BackupJob(
             new StubBackupProviderFactory(),
             new ConnectionResolver([]),
@@ -178,6 +181,7 @@ public sealed class BackupJobTests
             manifestStore,
             new FakeBackupRecordClient(),
             new FakeProgressReporterFactory(),
+            outboxStore,
             Options.Create(new AgentSettings { Token = "test-token", DashboardUrl = "http://localhost" }),
             new ActivitySource("BackupsterAgent.Tests"),
             NullLogger<BackupJob>.Instance);
