@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using BackupsterAgent.Contracts;
+using BackupsterAgent.Services.Common;
 using BackupsterAgent.Settings;
 using Microsoft.Extensions.Options;
 using NCrontab;
@@ -10,6 +11,7 @@ namespace BackupsterAgent.Services.Dashboard;
 public sealed class ScheduleService : DashboardClientBase
 {
     private readonly HttpClient _http;
+    private readonly ScheduleStore _store;
     private readonly ILogger<ScheduleService> _logger;
     private readonly ResiliencePipeline _pipeline;
 
@@ -23,14 +25,20 @@ public sealed class ScheduleService : DashboardClientBase
 
     public ScheduleService(
         HttpClient http,
+        ScheduleStore store,
         IOptions<AgentSettings> settings,
         IDashboardAuthGuard authGuard,
         ILogger<ScheduleService> logger)
         : base(settings.Value, authGuard)
     {
         _http = http;
+        _store = store;
         _logger = logger;
         _pipeline = BuildRetryPipeline(nameof(ScheduleService), logger);
+
+        _cachedSchedule = _store.TryLoad();
+        if (_cachedSchedule is not null)
+            _logger.LogInformation("ScheduleService: loaded schedule from disk cache.");
     }
 
     public async Task<DateTime?> GetNextRunAsync(string databaseName, CancellationToken ct)
@@ -84,6 +92,7 @@ public sealed class ScheduleService : DashboardClientBase
 
             _cachedSchedule = fetched;
             _lastFetchAt = DateTime.UtcNow;
+            _store.Write(fetched);
         }
         catch (Exception ex)
         {

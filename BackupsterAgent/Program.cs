@@ -97,6 +97,9 @@ builder.Services.AddSingleton<IUploadServiceFactory, UploadServiceFactory>();
 builder.Services.AddSingleton<IDashboardAuthGuard, DashboardAuthGuard>();
 builder.Services.AddHttpClient<IBackupRecordClient, BackupRecordClient>(
     c => c.Timeout = TimeSpan.FromSeconds(20));
+var scheduleCachePath = Path.Combine(configDir, "schedule.json");
+builder.Services.AddSingleton(sp =>
+    new ScheduleStore(scheduleCachePath, sp.GetRequiredService<ILogger<ScheduleStore>>()));
 builder.Services.AddHttpClient<ScheduleService>(
     c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>(
