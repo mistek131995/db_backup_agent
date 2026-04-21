@@ -12,8 +12,9 @@
 ## Требования
 
 - .NET 10 Runtime (или SDK для сборки из исходников)
-- `pg_dump` в `PATH` — для PostgreSQL
-- `sqlcmd` в `PATH` — для MSSQL
+- `pg_dump` / `psql` в `PATH` — для PostgreSQL (backup + restore)
+- `mysqldump` / `mysql` в `PATH` — для MySQL/MariaDB (backup + restore)
+- `sqlcmd` в `PATH` — для MSSQL (backup + restore)
 - Зарегистрированный агент на [backupster.io](https://backupster.io/) (нужен токен)
 
 ---
