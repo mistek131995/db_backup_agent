@@ -133,6 +133,7 @@ builder.Services.AddHostedService<FileSetWorker>();
 builder.Services.AddHostedService<ConnectionSyncWorker>();
 builder.Services.AddHostedService<FileSetSyncWorker>();
 builder.Services.AddHostedService<DatabaseSyncWorker>();
+builder.Services.AddHostedService<RestoreTempCleanupService>();
 builder.Services.AddHostedService<AgentTaskPollingService>();
 builder.Services.AddHostedService<ChunkGcWorker>();
 builder.Services.AddHostedService<RetentionWorker>();

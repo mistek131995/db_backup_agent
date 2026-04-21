@@ -2,10 +2,7 @@ using BackupsterAgent.Contracts;
 using BackupsterAgent.Enums;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Dashboard;
-using BackupsterAgent.Services.Restore;
-using BackupsterAgent.Settings;
 using BackupsterAgent.Workers.Handlers;
-using Microsoft.Extensions.Options;
 
 namespace BackupsterAgent.Workers;
 
@@ -18,20 +15,17 @@ public sealed class AgentTaskPollingService : BackgroundService
     private readonly IAgentTaskClient _client;
     private readonly IReadOnlyList<IAgentTaskHandler> _handlers;
     private readonly IAgentActivityLock _activityLock;
-    private readonly RestoreSettings _restoreSettings;
     private readonly ILogger<AgentTaskPollingService> _logger;
 
     public AgentTaskPollingService(
         IAgentTaskClient client,
         IEnumerable<IAgentTaskHandler> handlers,
         IAgentActivityLock activityLock,
-        IOptions<RestoreSettings> restoreSettings,
         ILogger<AgentTaskPollingService> logger)
     {
         _client = client;
         _handlers = handlers.ToArray();
         _activityLock = activityLock;
-        _restoreSettings = restoreSettings.Value;
         _logger = logger;
     }
 
@@ -40,8 +34,6 @@ public sealed class AgentTaskPollingService : BackgroundService
         _logger.LogInformation(
             "AgentTaskPollingService started. Poll interval: {PollSec}s, initial backoff: {BackoffSec}s, max backoff: {MaxSec}s",
             PollInterval.TotalSeconds, InitialBackoff.TotalSeconds, MaxBackoff.TotalSeconds);
-
-        CleanupOrphanTemp();
 
         var backoff = InitialBackoff;
 
@@ -142,49 +134,6 @@ public sealed class AgentTaskPollingService : BackgroundService
                 $"Тип задачи '{typeName}' не поддерживается этой версией агента. " +
                 "Обновите агента до актуальной версии.",
         };
-    }
-
-    private void CleanupOrphanTemp()
-    {
-        var tempRoot = DatabaseRestoreService.BuildTempRoot(_restoreSettings.TempPath);
-        try
-        {
-            if (!Directory.Exists(tempRoot))
-            {
-                _logger.LogDebug("Restore temp root '{TempRoot}' does not exist, nothing to clean.", tempRoot);
-                return;
-            }
-
-            var entries = Directory.EnumerateFileSystemEntries(tempRoot).ToList();
-            if (entries.Count == 0)
-            {
-                _logger.LogDebug("Restore temp root '{TempRoot}' is already clean.", tempRoot);
-                return;
-            }
-
-            _logger.LogInformation(
-                "Cleaning {Count} orphan entries from restore temp root '{TempRoot}'",
-                entries.Count, tempRoot);
-
-            foreach (var entry in entries)
-            {
-                try
-                {
-                    if (Directory.Exists(entry))
-                        Directory.Delete(entry, recursive: true);
-                    else
-                        File.Delete(entry);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to delete orphan temp entry '{Entry}'", entry);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to clean restore temp root '{TempRoot}'", tempRoot);
-        }
     }
 
     private static async Task<bool> DelayOrCancel(TimeSpan delay, CancellationToken ct)
