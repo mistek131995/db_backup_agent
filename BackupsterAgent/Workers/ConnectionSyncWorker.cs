@@ -1,7 +1,5 @@
-using BackupsterAgent.Services;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Dashboard;
-using Microsoft.Extensions.Logging;
 
 namespace BackupsterAgent.Workers;
 

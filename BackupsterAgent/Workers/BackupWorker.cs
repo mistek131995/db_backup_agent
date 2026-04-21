@@ -1,10 +1,8 @@
 using BackupsterAgent.Configuration;
 using BackupsterAgent.Domain;
-using BackupsterAgent.Services;
 using BackupsterAgent.Services.Backup;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Dashboard;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BackupsterAgent.Workers;

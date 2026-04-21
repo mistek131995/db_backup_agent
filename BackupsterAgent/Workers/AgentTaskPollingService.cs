@@ -161,12 +161,15 @@ public sealed class AgentTaskPollingService : BackgroundService
     private PatchAgentTaskDto RejectUnsupported(AgentTaskForAgentDto task, string typeName)
     {
         _logger.LogWarning(
-            "AgentTaskPollingService: task {TaskId} has unsupported type '{Type}' — this agent version handles only Restore.",
+            "AgentTaskPollingService: task {TaskId} has unsupported type '{Type}'. " +
+            "Update the agent to a version that supports this task type.",
             task.Id, typeName);
         return new PatchAgentTaskDto
         {
             Status = AgentTaskStatus.Failed,
-            ErrorMessage = $"Тип задачи '{typeName}' не поддерживается этой версией агента.",
+            ErrorMessage =
+                $"Тип задачи '{typeName}' не поддерживается этой версией агента. " +
+                "Обновите агента до актуальной версии.",
         };
     }
 
