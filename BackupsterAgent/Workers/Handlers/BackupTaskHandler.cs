@@ -72,14 +72,16 @@ public sealed class BackupTaskHandler : IAgentTaskHandler
             };
         }
 
+        var mode = task.Backup.BackupMode;
+
         _logger.LogInformation(
-            "BackupTaskHandler: executing backup task {TaskId} for database '{Database}'",
-            task.Id, databaseName);
+            "BackupTaskHandler: executing backup task {TaskId} for database '{Database}' (mode={Mode})",
+            task.Id, databaseName, mode);
 
         BackupResult result;
         try
         {
-            result = await _backupJob.RunAsync(config, BackupMode.Logical, ct);
+            result = await _backupJob.RunAsync(config, mode, ct);
         }
         catch (OperationCanceledException)
         {
