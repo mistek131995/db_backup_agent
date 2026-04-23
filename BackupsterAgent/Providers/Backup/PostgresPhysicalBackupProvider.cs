@@ -19,8 +19,6 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
     {
         await CheckBinaryAsync("pg_basebackup", ct);
-        await CheckBinaryAsync("pg_ctl", ct);
-        await CheckBinaryAsync("tar", ct);
 
         var connString = new NpgsqlConnectionStringBuilder
         {
@@ -67,24 +65,6 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
                 $"PGDATA directory '{pgdata}' is not accessible on the agent host. " +
                 "Physical backup requires the agent and PostgreSQL to run on the same host. " +
                 "Use logical backup mode if the agent is remote.");
-
-        var testFile = Path.Combine(pgdata, $".backupster-preflight-{Guid.NewGuid():N}");
-        try
-        {
-            await File.WriteAllBytesAsync(testFile, [], ct);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch
-        {
-            throw new BackupPermissionException(
-                $"Агент не имеет прав на запись в каталог PGDATA '{pgdata}'. " +
-                "Для физического восстановления агент должен запускаться от имени пользователя с правами на запись в PGDATA. " +
-                $"Запустите агента от имени пользователя postgres.");
-        }
-        finally
-        {
-            try { if (File.Exists(testFile)) File.Delete(testFile); } catch { }
-        }
     }
 
     public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)

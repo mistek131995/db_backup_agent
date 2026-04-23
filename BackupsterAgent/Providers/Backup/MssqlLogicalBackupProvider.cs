@@ -12,7 +12,6 @@ public sealed class MssqlLogicalBackupProvider(ILogger<MssqlLogicalBackupProvide
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
     {
         await ValidateBackupPermissionsAsync(connection, database, ct);
-        await ValidateRestorePermissionsAsync(connection, database, ct);
     }
 
     private static async Task ValidateBackupPermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
@@ -45,32 +44,6 @@ SELECT IS_MEMBER('db_owner')     AS is_owner,
             $"Пример: ALTER ROLE db_datareader ADD MEMBER [{connection.Username}]; " +
             $"GRANT VIEW DEFINITION TO [{connection.Username}]; " +
             $"GRANT VIEW DATABASE STATE TO [{connection.Username}];");
-    }
-
-    private static async Task ValidateRestorePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
-    {
-        const string sql = @"
-SELECT IS_SRVROLEMEMBER('sysadmin')  AS is_sysadmin,
-       IS_SRVROLEMEMBER('dbcreator') AS is_dbcreator;";
-
-        await using var conn = new SqlConnection(BuildMasterConnectionString(connection));
-        await conn.OpenAsync(ct);
-
-        await using var cmd = new SqlCommand(sql, conn);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-
-        if (!await reader.ReadAsync(ct))
-            throw new BackupPermissionException("Не удалось прочитать серверные роли пользователя.");
-
-        var isSysadmin  = reader.GetInt32(0) == 1;
-        var isDbcreator = reader.GetInt32(1) == 1;
-
-        if (isSysadmin || isDbcreator) return;
-
-        throw new BackupPermissionException(
-            $"Пользователь '{connection.Username}' подключения '{connection.Name}' сможет создать бэкап БД '{database}', " +
-            "но не сможет его восстановить: отсутствуют права sysadmin или dbcreator. " +
-            $"Выдайте права: ALTER SERVER ROLE dbcreator ADD MEMBER [{connection.Username}];");
     }
 
     public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)
@@ -180,17 +153,6 @@ SELECT IS_SRVROLEMEMBER('sysadmin')  AS is_sysadmin,
         {
             DataSource = $"{connection.Host},{connection.Port}",
             InitialCatalog = database,
-            UserID = connection.Username,
-            Password = connection.Password,
-            Encrypt = true,
-            TrustServerCertificate = true,
-        }.ConnectionString;
-
-    private static string BuildMasterConnectionString(ConnectionConfig connection) =>
-        new SqlConnectionStringBuilder
-        {
-            DataSource = $"{connection.Host},{connection.Port}",
-            InitialCatalog = "master",
             UserID = connection.Username,
             Password = connection.Password,
             Encrypt = true,

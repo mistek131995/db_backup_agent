@@ -20,7 +20,6 @@ public sealed class MysqlLogicalBackupProvider : IBackupProvider
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
     {
         await ValidateBackupPermissionsAsync(connection, database, ct);
-        await ValidateRestorePermissionsAsync(connection, database, ct);
     }
 
     private static async Task ValidateBackupPermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
@@ -71,61 +70,6 @@ WHERE TABLE_SCHEMA = @db;";
                 $"Пользователь '{connection.Username}' подключения '{connection.Name}' не имеет глобальной привилегии PROCESS, " +
                 "необходимой для --single-transaction (mysqldump). " +
                 $"Выдайте права: GRANT PROCESS ON *.* TO '{connection.Username}'@'%'; FLUSH PRIVILEGES;");
-    }
-
-    private static async Task ValidateRestorePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
-    {
-        const string globalSql = @"
-SELECT
-  MAX(CASE WHEN PRIVILEGE_TYPE IN ('CREATE', 'ALL PRIVILEGES') THEN 1 ELSE 0 END) AS has_create,
-  MAX(CASE WHEN PRIVILEGE_TYPE IN ('DROP',   'ALL PRIVILEGES') THEN 1 ELSE 0 END) AS has_drop
-FROM information_schema.USER_PRIVILEGES;";
-
-        const string schemaSql = @"
-SELECT
-  MAX(CASE WHEN PRIVILEGE_TYPE IN ('CREATE', 'ALL PRIVILEGES') THEN 1 ELSE 0 END) AS has_create,
-  MAX(CASE WHEN PRIVILEGE_TYPE IN ('DROP',   'ALL PRIVILEGES') THEN 1 ELSE 0 END) AS has_drop
-FROM information_schema.SCHEMA_PRIVILEGES
-WHERE TABLE_SCHEMA = @db;";
-
-        await using var conn = new MySqlConnection(BuildAdminConnectionString(connection));
-        await conn.OpenAsync(ct);
-
-        bool globalCreate, globalDrop;
-        await using (var cmd = new MySqlCommand(globalSql, conn))
-        await using (var reader = await cmd.ExecuteReaderAsync(ct))
-        {
-            if (!await reader.ReadAsync(ct))
-                throw new BackupPermissionException("Не удалось прочитать данные о правах пользователя.");
-            globalCreate = !reader.IsDBNull(0) && Convert.ToInt32(reader.GetValue(0)) == 1;
-            globalDrop   = !reader.IsDBNull(1) && Convert.ToInt32(reader.GetValue(1)) == 1;
-        }
-
-        if (globalCreate && globalDrop) return;
-
-        bool schemaCreate, schemaDrop;
-        await using (var cmd2 = new MySqlCommand(schemaSql, conn))
-        {
-            cmd2.Parameters.AddWithValue("@db", database);
-            await using var reader2 = await cmd2.ExecuteReaderAsync(ct);
-            if (!await reader2.ReadAsync(ct))
-            {
-                schemaCreate = false;
-                schemaDrop   = false;
-            }
-            else
-            {
-                schemaCreate = !reader2.IsDBNull(0) && Convert.ToInt32(reader2.GetValue(0)) == 1;
-                schemaDrop   = !reader2.IsDBNull(1) && Convert.ToInt32(reader2.GetValue(1)) == 1;
-            }
-        }
-
-        if ((globalCreate || schemaCreate) && (globalDrop || schemaDrop)) return;
-
-        throw new BackupPermissionException(
-            $"Пользователь '{connection.Username}' подключения '{connection.Name}' сможет создать бэкап БД '{database}', " +
-            "но не сможет его восстановить: отсутствуют привилегии CREATE и/или DROP. " +
-            $"Выдайте права: GRANT CREATE, DROP ON *.* TO '{connection.Username}'@'%'; FLUSH PRIVILEGES;");
     }
 
     public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)
@@ -260,16 +204,6 @@ WHERE TABLE_SCHEMA = @db;";
             Port = (uint)connection.Port,
             UserID = connection.Username,
             Password = connection.Password,
-        }.ToString();
-
-    private static string BuildAdminConnectionString(ConnectionConfig connection) =>
-        new MySqlConnectionStringBuilder
-        {
-            Server = connection.Host,
-            Port = (uint)connection.Port,
-            UserID = connection.Username,
-            Password = connection.Password,
-            Database = "information_schema",
         }.ToString();
 
     private void TryDeleteFile(string path)
