@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using BackupsterAgent.Configuration;
 using BackupsterAgent.Exceptions;
+using BackupsterAgent.Services.Common.Resolvers;
 using Npgsql;
 
 namespace BackupsterAgent.Providers.Restore;
@@ -9,10 +10,14 @@ namespace BackupsterAgent.Providers.Restore;
 public sealed class PostgresRestoreProvider : IRestoreProvider
 {
     private readonly ILogger<PostgresRestoreProvider> _logger;
+    private readonly PostgresBinaryResolver _binaryResolver;
 
-    public PostgresRestoreProvider(ILogger<PostgresRestoreProvider> logger)
+    public PostgresRestoreProvider(
+        ILogger<PostgresRestoreProvider> logger,
+        PostgresBinaryResolver binaryResolver)
     {
         _logger = logger;
+        _binaryResolver = binaryResolver;
     }
 
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
@@ -76,9 +81,11 @@ FROM pg_roles WHERE rolname = current_user;";
 
     public async Task RestoreAsync(ConnectionConfig connection, string targetDatabase, string restoreFilePath, CancellationToken ct)
     {
+        var binary = await _binaryResolver.ResolveAsync(connection, "psql", ct);
+
         var psi = new ProcessStartInfo
         {
-            FileName = "psql",
+            FileName = binary,
             ArgumentList =
             {
                 "-h", connection.Host,
@@ -96,6 +103,8 @@ FROM pg_roles WHERE rolname = current_user;";
             CreateNoWindow = true,
         };
         psi.EnvironmentVariables["PGPASSWORD"] = connection.Password;
+        psi.EnvironmentVariables["LC_MESSAGES"] = "C";
+        psi.EnvironmentVariables["LANG"] = "C";
 
         using var process = new Process { StartInfo = psi };
         process.Start();

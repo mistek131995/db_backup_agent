@@ -4,6 +4,7 @@ using System.Text;
 using BackupsterAgent.Configuration;
 using BackupsterAgent.Domain;
 using BackupsterAgent.Exceptions;
+using BackupsterAgent.Services.Common.Resolvers;
 using Npgsql;
 
 namespace BackupsterAgent.Providers.Backup;
@@ -11,15 +12,20 @@ namespace BackupsterAgent.Providers.Backup;
 public sealed class PostgresLogicalBackupProvider : IBackupProvider
 {
     private readonly ILogger<PostgresLogicalBackupProvider> _logger;
+    private readonly PostgresBinaryResolver _binaryResolver;
 
-    public PostgresLogicalBackupProvider(ILogger<PostgresLogicalBackupProvider> logger)
+    public PostgresLogicalBackupProvider(
+        ILogger<PostgresLogicalBackupProvider> logger,
+        PostgresBinaryResolver binaryResolver)
     {
         _logger = logger;
+        _binaryResolver = binaryResolver;
     }
 
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
     {
-        await CheckBinaryAsync("pg_dump", ct);
+        var binary = await _binaryResolver.ResolveAsync(connection, "pg_dump", ct);
+        await CheckBinaryAsync(binary, ct);
 
         const string sql = @"
 SELECT rolsuper,
@@ -60,6 +66,8 @@ FROM pg_roles WHERE rolname = current_user;";
 
     public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)
     {
+        var binary = await _binaryResolver.ResolveAsync(connection, "pg_dump", ct);
+
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{config.Database}_{timestamp}.sql.gz";
         var outputFile = Path.Combine(config.OutputPath, fileName);
@@ -67,12 +75,12 @@ FROM pg_roles WHERE rolname = current_user;";
         Directory.CreateDirectory(config.OutputPath);
 
         _logger.LogInformation(
-            "Starting PostgreSQL logical backup. Database: '{Database}', Host: '{Host}:{Port}', Output: '{OutputFile}'",
-            config.Database, connection.Host, connection.Port, outputFile);
+            "Starting PostgreSQL logical backup. Database: '{Database}', Host: '{Host}:{Port}', Output: '{OutputFile}', Binary: '{Binary}'",
+            config.Database, connection.Host, connection.Port, outputFile, binary);
 
         var psi = new ProcessStartInfo
         {
-            FileName = "pg_dump",
+            FileName = binary,
             ArgumentList =
             {
                 "-h", connection.Host,
@@ -91,6 +99,8 @@ FROM pg_roles WHERE rolname = current_user;";
         };
 
         psi.Environment["PGPASSWORD"] = connection.Password;
+        psi.Environment["LC_MESSAGES"] = "C";
+        psi.Environment["LANG"] = "C";
 
         var sw = Stopwatch.StartNew();
         using var process = new Process { StartInfo = psi };
@@ -158,6 +168,9 @@ FROM pg_roles WHERE rolname = current_user;";
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+
+        psi.Environment["LC_MESSAGES"] = "C";
+        psi.Environment["LANG"] = "C";
 
         using var process = new Process { StartInfo = psi };
         try

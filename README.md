@@ -82,6 +82,12 @@ Backup и restore/delete на одном агенте не идут паралл
 - **Файловые наборы:** произвольные каталоги с рекурсивным обходом (только S3).
 - **Хранилища:** S3-совместимые (MinIO, Yandex Object Storage, AWS S3, Cloudflare R2) — полный функционал; SFTP — только upload/delete дампа. На SFTP не поддерживаются: restore (download), chunk GC (list), файловый бэкап и file-set'ы.
 
+### Клиентские бинарники PostgreSQL
+
+Агент сам выбирает `pg_dump`/`pg_basebackup`/`psql`/`pg_ctl` под мажорную версию сервера, к которому подключается: спрашивает `SHOW server_version_num` и ищет бинарь в стандартном месте установки (Windows-реестр + `C:\Program Files\PostgreSQL\<MAJOR>\bin`; на Linux — `/usr/lib/postgresql/<MAJOR>/bin` для Debian/Ubuntu и `/usr/pgsql-<MAJOR>/bin` для RHEL/PGDG). Если каталог не найден — fallback на `PATH`. На хосте с несколькими PG-версиями это избавляет от ошибок `incompatible server version` и от возни с `PATH` / перезагрузкой Windows для обновления кеша `services.exe`.
+
+Нестандартную установку можно задать явно — полем `PostgresBinPath` в `Connections[]` (см. [docs/postgres.md](docs/postgres.md)).
+
 ---
 
 ## Поведение при ошибках

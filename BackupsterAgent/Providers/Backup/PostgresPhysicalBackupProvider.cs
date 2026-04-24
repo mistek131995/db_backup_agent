@@ -3,6 +3,7 @@ using System.Text;
 using BackupsterAgent.Configuration;
 using BackupsterAgent.Domain;
 using BackupsterAgent.Exceptions;
+using BackupsterAgent.Services.Common.Resolvers;
 using Npgsql;
 
 namespace BackupsterAgent.Providers.Backup;
@@ -10,15 +11,20 @@ namespace BackupsterAgent.Providers.Backup;
 public sealed class PostgresPhysicalBackupProvider : IBackupProvider
 {
     private readonly ILogger<PostgresPhysicalBackupProvider> _logger;
+    private readonly PostgresBinaryResolver _binaryResolver;
 
-    public PostgresPhysicalBackupProvider(ILogger<PostgresPhysicalBackupProvider> logger)
+    public PostgresPhysicalBackupProvider(
+        ILogger<PostgresPhysicalBackupProvider> logger,
+        PostgresBinaryResolver binaryResolver)
     {
         _logger = logger;
+        _binaryResolver = binaryResolver;
     }
 
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
     {
-        await CheckBinaryAsync("pg_basebackup", ct);
+        var binary = await _binaryResolver.ResolveAsync(connection, "pg_basebackup", ct);
+        await CheckBinaryAsync(binary, ct);
 
         var connString = new NpgsqlConnectionStringBuilder
         {
@@ -50,6 +56,19 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
                     $"Выдайте права: ALTER ROLE \"{connection.Username}\" WITH REPLICATION;");
         }
 
+        await using (var cmd = new NpgsqlCommand(
+            "SELECT string_agg(spcname, ', ' ORDER BY spcname) " +
+            "FROM pg_tablespace WHERE spcname NOT IN ('pg_default', 'pg_global');", conn))
+        {
+            var extraTablespaces = await cmd.ExecuteScalarAsync(ct) as string;
+            if (!string.IsNullOrEmpty(extraTablespaces))
+                throw new BackupPermissionException(
+                    $"Кластер '{connection.Name}' использует tablespaces ({extraTablespaces}), " +
+                    "но physical-режим Backupster их не поддерживает: данные tablespace остались бы вне архива, " +
+                    "а restore развернул бы кластер с битыми ссылками на пустые каталоги. " +
+                    "Используйте logical-режим (BackupMode=Logical) — он не зависит от tablespaces.");
+        }
+
         string pgdata;
         await using (var cmd = new NpgsqlCommand("SHOW data_directory;", conn))
             pgdata = (string?)await cmd.ExecuteScalarAsync(ct) ?? string.Empty;
@@ -69,6 +88,7 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
 
     public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)
     {
+        var binary = await _binaryResolver.ResolveAsync(connection, "pg_basebackup", ct);
 
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{config.Database}_{timestamp}.tar.gz";
@@ -78,12 +98,12 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
         Directory.CreateDirectory(config.OutputPath);
 
         _logger.LogInformation(
-            "Starting PostgreSQL physical backup (pg_basebackup). Host: '{Host}:{Port}', Output: '{OutputFile}'",
-            connection.Host, connection.Port, outputFile);
+            "Starting PostgreSQL physical backup (pg_basebackup). Host: '{Host}:{Port}', Output: '{OutputFile}', Binary: '{Binary}'",
+            connection.Host, connection.Port, outputFile, binary);
 
         var psi = new ProcessStartInfo
         {
-            FileName = "pg_basebackup",
+            FileName = binary,
             ArgumentList =
             {
                 "-h", connection.Host,
@@ -104,6 +124,8 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
         };
 
         psi.Environment["PGPASSWORD"] = connection.Password;
+        psi.Environment["LC_MESSAGES"] = "C";
+        psi.Environment["LANG"] = "C";
 
         var sw = Stopwatch.StartNew();
         using var process = new Process { StartInfo = psi };
@@ -178,6 +200,9 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+
+        psi.Environment["LC_MESSAGES"] = "C";
+        psi.Environment["LANG"] = "C";
 
         using var process = new Process { StartInfo = psi };
         try
