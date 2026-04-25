@@ -1,14 +1,10 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using BackupsterAgent.Configuration;
 using BackupsterAgent.Enums;
-using BackupsterAgent.Providers;
-using BackupsterAgent.Providers.Backup;
 using BackupsterAgent.Providers.Upload;
 using BackupsterAgent.Services;
 using BackupsterAgent.Services.Backup;
 using BackupsterAgent.Services.Common;
-using BackupsterAgent.Services.Common.Outbox;
 using BackupsterAgent.Services.Common.Progress;
 using BackupsterAgent.Services.Common.Resolvers;
 using BackupsterAgent.Services.Common.Security;
@@ -41,11 +37,11 @@ public sealed class BackupJobTests
     [Test]
     public async Task CaptureFilesSafelyAsync_EmptyFilePaths_ReturnsBothNull()
     {
-        var job = BuildJob();
+        var pipeline = BuildPipeline();
         var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [] };
 
-        var (metrics, error) = await job.CaptureFilesSafelyAsync(
+        var (metrics, error) = await pipeline.CaptureFilesSafelyAsync(
             config, storage, _uploader, backupFolder: "db1/2026-04-17_00-00-00", dumpObjectKey: "db1/.../dump.enc",
             TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
@@ -63,11 +59,11 @@ public sealed class BackupJobTests
     {
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "a.bin"), new byte[] { 1, 2, 3 });
 
-        var job = BuildJob();
+        var pipeline = BuildPipeline();
         var storage = StorageFor(UploadProvider.Sftp);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
-        var (metrics, error) = await job.CaptureFilesSafelyAsync(
+        var (metrics, error) = await pipeline.CaptureFilesSafelyAsync(
             config, storage, _uploader, backupFolder: "db1/2026-04-17_00-00-00", dumpObjectKey: "db1/.../dump.enc",
             TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
@@ -86,13 +82,13 @@ public sealed class BackupJobTests
         var content = RandomNumberGenerator.GetBytes(1024);
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "file.bin"), content);
 
-        var job = BuildJob();
+        var pipeline = BuildPipeline();
         var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "customers", FilePaths = [_tempRoot] };
         const string backupFolder = "customers/2026-04-17_14-30-00";
         const string dumpKey = "customers/2026-04-17_14-30-00/dump.sql.gz.enc";
 
-        var (metrics, error) = await job.CaptureFilesSafelyAsync(
+        var (metrics, error) = await pipeline.CaptureFilesSafelyAsync(
             config, storage, _uploader, backupFolder, dumpKey, TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
         Assert.That(error, Is.Null);
@@ -113,11 +109,11 @@ public sealed class BackupJobTests
         await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "file.bin"), new byte[] { 1, 2, 3, 4 });
         _uploader.ThrowOnUpload = new InvalidOperationException("simulated S3 403");
 
-        var job = BuildJob();
+        var pipeline = BuildPipeline();
         var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
-        var (metrics, error) = await job.CaptureFilesSafelyAsync(
+        var (metrics, error) = await pipeline.CaptureFilesSafelyAsync(
             config, storage, _uploader, backupFolder: "db1/2026-04-17_14-30-00", dumpObjectKey: "db1/.../dump.enc",
             TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
 
@@ -137,7 +133,7 @@ public sealed class BackupJobTests
         for (int i = 0; i < 3; i++)
             File.WriteAllBytes(Path.Combine(_tempRoot, $"f{i}.bin"), new byte[] { (byte)i });
 
-        var job = BuildJob();
+        var pipeline = BuildPipeline();
         var storage = StorageFor(UploadProvider.S3);
         var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
 
@@ -145,7 +141,7 @@ public sealed class BackupJobTests
         cts.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(() =>
-            job.CaptureFilesSafelyAsync(
+            pipeline.CaptureFilesSafelyAsync(
                 config, storage, _uploader, "db1/2026-04-17_14-30-00", "dump.enc",
                 TestHelpers.NullReporter<BackupStage>(), cts.Token));
     }
@@ -157,7 +153,7 @@ public sealed class BackupJobTests
         _ => throw new ArgumentOutOfRangeException(nameof(provider)),
     };
 
-    private BackupJob BuildJob()
+    private DatabaseBackupPipeline BuildPipeline()
     {
         var encKey = RandomNumberGenerator.GetBytes(32);
         var encryption = new EncryptionService(
@@ -172,10 +168,7 @@ public sealed class BackupJobTests
             NullLoggerFactory.Instance,
             NullLogger<ManifestStore>.Instance);
 
-        var outboxRoot = Path.Combine(Path.GetTempPath(), "dbbackup-job-outbox-" + Path.GetRandomFileName());
-        var outboxStore = new OutboxStore(outboxRoot, NullLogger<OutboxStore>.Instance);
-
-        return new BackupJob(
+        return new DatabaseBackupPipeline(
             new StubBackupProviderFactory(),
             new ConnectionResolver([]),
             new StorageResolver([]),
@@ -183,11 +176,7 @@ public sealed class BackupJobTests
             new StubUploadProviderFactory(_uploader),
             fileBackup,
             manifestStore,
-            new FakeBackupRecordClient(),
-            new FakeProgressReporterFactory(),
-            outboxStore,
-            new ActivitySource("BackupsterAgent.Tests"),
-            NullLogger<BackupJob>.Instance);
+            NullLogger<DatabaseBackupPipeline>.Instance);
     }
 
     private sealed class FakeUploadProvider : IUploadProvider
@@ -221,16 +210,16 @@ public sealed class BackupJobTests
         }
 
         public Task DownloadAsync(string objectKey, string localPath, IProgress<long>? progress, CancellationToken ct) =>
-            throw new NotSupportedException("BackupJob must not call DownloadAsync");
+            throw new NotSupportedException("DatabaseBackupPipeline must not call DownloadAsync");
 
         public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
-            throw new NotSupportedException("BackupJob must not call DownloadBytesAsync");
+            throw new NotSupportedException("DatabaseBackupPipeline must not call DownloadBytesAsync");
 
         public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
-            throw new NotSupportedException("BackupJob must not call ListAsync");
+            throw new NotSupportedException("DatabaseBackupPipeline must not call ListAsync");
 
         public Task DeleteAsync(string objectKey, CancellationToken ct) =>
-            throw new NotSupportedException("BackupJob must not call DeleteAsync");
+            throw new NotSupportedException("DatabaseBackupPipeline must not call DeleteAsync");
     }
 
     private sealed class StubUploadProviderFactory(IUploadProvider service) : IUploadProviderFactory
@@ -238,9 +227,9 @@ public sealed class BackupJobTests
         public IUploadProvider GetProvider(string storageName) => service;
     }
 
-    private sealed class StubBackupProviderFactory : IBackupProviderFactory
+    private sealed class StubBackupProviderFactory : BackupsterAgent.Providers.Backup.IBackupProviderFactory
     {
-        public IBackupProvider GetProvider(DatabaseType databaseType, BackupMode backupMode) =>
+        public BackupsterAgent.Providers.Backup.IBackupProvider GetProvider(DatabaseType databaseType, BackupMode backupMode) =>
             throw new NotSupportedException("CaptureFilesSafelyAsync must not touch the backup provider");
     }
 }

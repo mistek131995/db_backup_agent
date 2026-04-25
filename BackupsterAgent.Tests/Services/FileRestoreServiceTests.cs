@@ -190,6 +190,43 @@ public sealed class FileRestoreServiceTests
     }
 
     [Test]
+    public async Task RunAsync_TwoConsecutiveRestoresOfSameRelPath_SecondContentWins()
+    {
+        var contentV1 = RandomNumberGenerator.GetBytes(2048);
+        var contentV2 = RandomNumberGenerator.GetBytes(3072);
+        Assert.That(contentV1, Is.Not.EqualTo(contentV2));
+
+        var sha1 = StoreChunk(contentV1);
+        var entryV1 = new FileEntry("excel.xlsx", contentV1.Length, 0, SafeMode, [sha1]);
+        StoreManifest(new FileManifest(DateTime.UtcNow, "fileset", "", [entryV1]));
+
+        var firstResult = await _service.RunAsync(
+            ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+
+        Assert.That(firstResult.Status, Is.EqualTo(RestoreFilesStatus.Success), "first restore must succeed");
+        var target = Path.Combine(_tempRoot, "excel.xlsx");
+        Assert.That(await File.ReadAllBytesAsync(target), Is.EqualTo(contentV1),
+            "after first restore, target must hold v1 bytes");
+
+        var sha2 = StoreChunk(contentV2);
+        var entryV2 = new FileEntry("excel.xlsx", contentV2.Length, 0, SafeMode, [sha2]);
+        StoreManifest(new FileManifest(DateTime.UtcNow, "fileset", "", [entryV2]));
+
+        var secondResult = await _service.RunAsync(
+            ManifestKey, _tempRoot, _upload, TestHelpers.NullReporter<RestoreStage>(), CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(secondResult.Status, Is.EqualTo(RestoreFilesStatus.Success),
+                "second restore must succeed");
+            Assert.That(File.Exists(target + ".restore-tmp"), Is.False,
+                ".restore-tmp from second restore must be cleaned up");
+        });
+        Assert.That(await File.ReadAllBytesAsync(target), Is.EqualTo(contentV2),
+            "after second restore, target must hold v2 bytes — overwrite of pre-existing same-relPath file");
+    }
+
+    [Test]
     public async Task RunAsync_WindowsDriveLetterInEntryPath_RejectedAsUnsafe()
     {
         var content = RandomNumberGenerator.GetBytes(50);

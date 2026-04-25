@@ -6,6 +6,7 @@ using BackupsterAgent.Enums;
 using BackupsterAgent.Providers.Backup;
 using BackupsterAgent.Providers.Upload;
 using BackupsterAgent.Services.Backup;
+using BackupsterAgent.Services.Backup.Coordinator;
 using BackupsterAgent.Services.Common.Outbox;
 using BackupsterAgent.Services.Common.Resolvers;
 using BackupsterAgent.Services.Common.Security;
@@ -121,6 +122,28 @@ public sealed class BackupJobRunTests
     }
 
     [Test]
+    public void RunAsync_OfflineAtStartCancelled_StillEnqueuesOutboxEntry()
+    {
+        _recordClient.NextOpen = new OpenRecordResult(DashboardAvailability.OfflineRetryable);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            () => BuildJob().RunAsync(Config(), BackupMode.Logical, cts.Token));
+
+        var outbox = _outboxStore.ListAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.That(outbox, Has.Count.EqualTo(1),
+            "cancelled offline run must still preserve the outbox entry via the 10-sec fallback CTS");
+        Assert.Multiple(() =>
+        {
+            Assert.That(outbox[0].ServerRecordId, Is.Null);
+            Assert.That(outbox[0].Status, Is.EqualTo("failed"));
+        });
+    }
+
+    [Test]
     public async Task RunAsync_PermanentSkipOnOpen_ReturnsFailedAndDoesNotEnqueue()
     {
         _recordClient.NextOpen = new OpenRecordResult(DashboardAvailability.PermanentSkip);
@@ -170,7 +193,7 @@ public sealed class BackupJobRunTests
             new StorageConfig { Name = "s3-main", Provider = UploadProvider.S3, S3 = new S3Settings() },
         ]);
 
-        return new BackupJob(
+        var pipeline = new DatabaseBackupPipeline(
             new StubProviderFactory(_provider),
             connections,
             storages,
@@ -178,11 +201,16 @@ public sealed class BackupJobRunTests
             new StubUploadFactory(_uploader),
             fileBackup,
             manifestStore,
+            NullLogger<DatabaseBackupPipeline>.Instance);
+
+        var coordinator = new BackupRunCoordinator(
             _recordClient,
             new FakeProgressReporterFactory(),
             _outboxStore,
             new ActivitySource("BackupsterAgent.Tests"),
-            NullLogger<BackupJob>.Instance);
+            NullLogger<BackupRunCoordinator>.Instance);
+
+        return new BackupJob(coordinator, pipeline);
     }
 
     private sealed class StubBackupProvider(string tempRoot) : IBackupProvider

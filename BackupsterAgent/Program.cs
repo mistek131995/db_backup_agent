@@ -5,6 +5,7 @@ using BackupsterAgent.Providers.Backup;
 using BackupsterAgent.Providers.Restore;
 using BackupsterAgent.Services;
 using BackupsterAgent.Services.Backup;
+using BackupsterAgent.Services.Backup.Coordinator;
 using BackupsterAgent.Providers.Upload;
 using BackupsterAgent.Services.Common;
 using BackupsterAgent.Services.Common.Outbox;
@@ -135,6 +136,9 @@ builder.Services.AddSingleton<IProgressReporterFactory, ProgressReporterFactory>
 builder.Services.AddSingleton<DatabaseRestoreService>();
 builder.Services.AddSingleton<FileRestoreService>();
 builder.Services.AddSingleton<BackupDeleteService>();
+builder.Services.AddSingleton<BackupRunCoordinator>();
+builder.Services.AddSingleton<DatabaseBackupPipeline>();
+builder.Services.AddSingleton<FileSetBackupPipeline>();
 builder.Services.AddSingleton<BackupJob>();
 builder.Services.AddSingleton<FileSetBackupJob>();
 builder.Services.AddSingleton<IAgentTaskHandler, RestoreTaskHandler>();
