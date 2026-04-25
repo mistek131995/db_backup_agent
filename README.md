@@ -80,7 +80,7 @@ Backup и restore/delete на одном агенте не идут паралл
 
 - **БД:** PostgreSQL, MySQL/MariaDB, MSSQL.
 - **Файловые наборы:** произвольные каталоги с рекурсивным обходом (только S3).
-- **Хранилища:** S3-совместимые (MinIO, Yandex Object Storage, AWS S3, Cloudflare R2) — полный функционал; SFTP — только upload/delete дампа. На SFTP не поддерживаются: restore (download), chunk GC (list), файловый бэкап и file-set'ы.
+- **Хранилища:** S3-совместимые (MinIO, Yandex Object Storage, AWS S3, Cloudflare R2) — полный функционал; SFTP — upload/download/delete дампа БД (включая restore через дашборд). На SFTP не поддерживаются: chunk GC (list), файловый бэкап и file-set'ы.
 
 ### Клиентские бинарники PostgreSQL
 

@@ -73,19 +73,107 @@ public sealed class SftpUploadProvider : IUploadProvider
     }
 
     public Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("Byte-array upload is not supported for SFTP provider. File backup with deduplication requires S3.");
+        throw new NotSupportedException("Byte-array upload is not supported for SFTP provider. File backup with deduplication is S3-only.");
 
     public Task<bool> ExistsAsync(string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("ExistsAsync is not supported for SFTP provider. File backup with deduplication requires S3.");
+        throw new NotSupportedException("ExistsAsync is not supported for SFTP provider. File backup with deduplication is S3-only.");
 
-    public Task DownloadAsync(string objectKey, string localPath, IProgress<long>? progress, CancellationToken ct) =>
-        throw new NotSupportedException("DownloadAsync is not supported for SFTP provider. Restore requires S3.");
+    public async Task DownloadAsync(string objectKey, string localPath, IProgress<long>? progress, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+
+        var remotePath = $"{_settings.RemotePath.TrimEnd('/')}/{objectKey.TrimStart('/')}";
+        var tmpPath = localPath + ".download-tmp";
+
+        _logger.LogInformation(
+            "SFTP downloading {Host}:{RemotePath} → '{LocalPath}'",
+            _settings.Host, remotePath, localPath);
+
+        using var client = BuildClient();
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                client.Connect();
+
+                using var reg = ct.Register(() =>
+                {
+                    try { client.Disconnect(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "SFTP disconnect on cancel failed (best-effort)"); }
+                });
+
+                using var fileStream = new FileStream(
+                    tmpPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                    bufferSize: 65536);
+
+                Action<ulong>? callback = progress is null
+                    ? null
+                    : downloaded => progress.Report((long)downloaded);
+
+                client.DownloadFile(remotePath, fileStream, callback);
+
+                ct.ThrowIfCancellationRequested();
+                client.Disconnect();
+            }, ct);
+
+            File.Move(tmpPath, localPath, overwrite: true);
+        }
+        catch (SftpPathNotFoundException)
+        {
+            SafeDeleteTmp(tmpPath);
+            throw new FileNotFoundException(
+                $"SFTP-файл '{remotePath}' не найден на хосте {_settings.Host}.", remotePath);
+        }
+        catch (SftpPermissionDeniedException ex)
+        {
+            SafeDeleteTmp(tmpPath);
+            throw new UnauthorizedAccessException(
+                $"Нет прав на чтение SFTP-файла '{remotePath}' на хосте {_settings.Host}. " +
+                "Проверьте, что у SSH-пользователя есть права на чтение файла бэкапа.", ex);
+        }
+        catch (SshAuthenticationException ex)
+        {
+            SafeDeleteTmp(tmpPath);
+            throw new UnauthorizedAccessException(
+                $"Не удалось аутентифицироваться на SFTP-сервере {_settings.Host}. " +
+                "Проверьте логин/пароль или приватный ключ в настройках хранилища.", ex);
+        }
+        catch (SshConnectionException ex)
+        {
+            SafeDeleteTmp(tmpPath);
+            throw new IOException(
+                $"Не удалось подключиться к SFTP-серверу {_settings.Host}:{_settings.Port}. " +
+                "Проверьте сетевой доступ и host key fingerprint.", ex);
+        }
+        catch (Exception ex) when (ct.IsCancellationRequested && ex is not OperationCanceledException)
+        {
+            SafeDeleteTmp(tmpPath);
+            throw new OperationCanceledException("Скачивание SFTP-файла отменено.", ex, ct);
+        }
+        catch
+        {
+            SafeDeleteTmp(tmpPath);
+            throw;
+        }
+
+        _logger.LogInformation("SFTP download completed: '{LocalPath}'", localPath);
+    }
 
     public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("DownloadBytesAsync is not supported for SFTP provider. Restore requires S3.");
+        throw new NotSupportedException("DownloadBytesAsync is not supported for SFTP provider. File backup and chunk operations are S3-only.");
 
     public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
-        throw new NotSupportedException("ListAsync is not supported for SFTP provider. Chunk GC requires S3.");
+        throw new NotSupportedException("ListAsync is not supported for SFTP provider. Chunk GC is S3-only.");
+
+    private void SafeDeleteTmp(string tmpPath)
+    {
+        if (!File.Exists(tmpPath)) return;
+        try { File.Delete(tmpPath); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete SFTP download tmp file '{TmpPath}'", tmpPath); }
+    }
 
     public async Task DeleteAsync(string objectKey, CancellationToken ct)
     {
@@ -153,6 +241,7 @@ public sealed class SftpUploadProvider : IUploadProvider
             client = new SftpClient(host, port, username, _settings.Password);
         }
 
+        client.KeepAliveInterval = TimeSpan.FromSeconds(15);
         client.HostKeyReceived += OnHostKeyReceived;
         return client;
     }
