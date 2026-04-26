@@ -126,7 +126,7 @@ public sealed class DatabaseRestoreService
             }
 
             reporter.Report(RestoreStage.PreparingDatabase);
-            await provider.PrepareTargetDatabaseAsync(connection, targetDatabase, payload.ReplaceExisting, ct);
+            await provider.PrepareTargetDatabaseAsync(connection, targetDatabase, ct);
 
             reporter.Report(RestoreStage.RestoringDatabase);
             await provider.RestoreAsync(connection, targetDatabase, restoreFilePath, ct);

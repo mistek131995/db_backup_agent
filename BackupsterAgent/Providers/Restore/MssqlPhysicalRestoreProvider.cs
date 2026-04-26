@@ -40,7 +40,7 @@ SELECT IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin,
             $"Выдайте права: ALTER SERVER ROLE dbcreator ADD MEMBER [{connection.Username}];.");
     }
 
-    public async Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, bool replaceExisting, CancellationToken ct)
+    public async Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
     {
         var quoted = QuoteIdentifier(targetDatabase);
         var escapedName = targetDatabase.Replace("'", "''");

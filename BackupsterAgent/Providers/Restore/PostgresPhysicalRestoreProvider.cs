@@ -44,7 +44,7 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
         await EnsureClusterIsNotServiceManagedAsync(_pgDataPath, ct);
     }
 
-    public Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, bool replaceExisting, CancellationToken ct)
+    public Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
     {
         return Task.CompletedTask;
     }

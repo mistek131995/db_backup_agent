@@ -466,7 +466,7 @@ public sealed class DatabaseRestoreServiceTests
             return Task.CompletedTask;
         }
 
-        public Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, bool replaceExisting, CancellationToken ct)
+        public Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
         {
             PrepareCalls++;
             ct.ThrowIfCancellationRequested();
