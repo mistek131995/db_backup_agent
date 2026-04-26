@@ -19,6 +19,23 @@ public sealed class MssqlPhysicalBackupProvider : IBackupProvider
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
     {
         await ValidateBackupPermissionsAsync(connection, database, ct);
+        await EnsureNoFilestreamAsync(connection, database, ct);
+    }
+
+    private static async Task EnsureNoFilestreamAsync(ConnectionConfig connection, string database, CancellationToken ct)
+    {
+        const string sql = "SELECT COUNT(*) FROM sys.database_files WHERE type = 2;";
+
+        await using var conn = new SqlConnection(BuildConnectionString(connection, database));
+        await conn.OpenAsync(ct);
+
+        await using var cmd = new SqlCommand(sql, conn);
+        var filestreamCount = (int)(await cmd.ExecuteScalarAsync(ct))!;
+
+        if (filestreamCount > 0)
+            throw new InvalidOperationException(
+                $"Бэкап БД '{database}' содержит FILESTREAM filegroup, что в текущей версии агента не поддерживается. " +
+                "Удалите БД из конфига или обратитесь к администратору.");
     }
 
     private static async Task ValidateBackupPermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)

@@ -75,6 +75,10 @@ END";
                 $"Бэкап-файл '{restoreFilePath}' не содержит data-файлов (тип D). " +
                 "Восстановление невозможно — файл повреждён или это не full backup.");
 
+        if (fileList.Any(f => f.Type == "S"))
+            throw new InvalidOperationException(
+                "Бэкап содержит FILESTREAM filegroup, восстановление таких бэкапов в текущей версии агента не поддерживается.");
+
         var (dataPath, logPath) = await GetDefaultPathsAsync(connection, ct);
         var moveClauses = BuildMoveClauses(fileList, targetDatabase, dataPath, logPath);
 
