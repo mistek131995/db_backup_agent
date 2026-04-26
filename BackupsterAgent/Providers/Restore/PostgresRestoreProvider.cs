@@ -134,7 +134,7 @@ FROM pg_roles WHERE rolname = current_user;";
             var stderr = stderrTask.Result.Trim();
             var stdout = stdoutTask.Result.Trim();
             var detail = string.IsNullOrEmpty(stderr) ? stdout : stderr;
-            throw new InvalidOperationException($"psql restore failed (exit code {process.ExitCode}): {detail}");
+            throw new InvalidOperationException($"psql завершился с ошибкой (код {process.ExitCode}): {detail}");
         }
 
         _logger.LogInformation("Postgres restore completed for database '{Database}'", targetDatabase);

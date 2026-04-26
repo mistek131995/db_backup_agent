@@ -75,15 +75,15 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
 
         if (string.IsNullOrWhiteSpace(pgdata))
             throw new InvalidOperationException(
-                $"Failed to retrieve PGDATA path from cluster '{connection.Name}'.");
+                $"Не удалось получить путь PGDATA из кластера '{connection.Name}'.");
 
         _logger.LogInformation("Resolved PGDATA from cluster: '{PgDataPath}'", pgdata);
 
         if (!Directory.Exists(pgdata))
             throw new InvalidOperationException(
-                $"PGDATA directory '{pgdata}' is not accessible on the agent host. " +
-                "Physical backup requires the agent and PostgreSQL to run on the same host. " +
-                "Use logical backup mode if the agent is remote.");
+                $"Каталог PGDATA '{pgdata}' недоступен на хосте агента. " +
+                "Физический бэкап требует, чтобы агент и PostgreSQL выполнялись на одном хосте. " +
+                "Если агент удалённый — используйте режим logical.");
     }
 
     public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)
@@ -155,7 +155,7 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
                 _logger.LogError("pg_basebackup failed. ExitCode: {ExitCode}. Stderr: {Stderr}",
                     process.ExitCode, stderr);
                 throw new InvalidOperationException(
-                    $"pg_basebackup exited with code {process.ExitCode}: {stderr}");
+                    $"pg_basebackup завершился с кодом {process.ExitCode}: {stderr}");
             }
 
             var baseTar = Path.Combine(tempDir, "base.tar.gz");
@@ -165,7 +165,7 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
                     ? string.Join(", ", Directory.GetFiles(tempDir).Select(Path.GetFileName))
                     : "(directory missing)";
                 throw new InvalidOperationException(
-                    $"pg_basebackup did not produce expected file 'base.tar.gz'. Found: {found}");
+                    $"pg_basebackup не создал ожидаемый файл 'base.tar.gz'. Найдено: {found}");
             }
 
             File.Move(baseTar, outputFile, overwrite: true);
@@ -213,14 +213,14 @@ public sealed class PostgresPhysicalBackupProvider : IBackupProvider
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"{binary} is not available on this host. " +
-                $"Install the postgresql package and ensure {binary} is in PATH.", ex);
+                $"Бинарник {binary} недоступен на хосте агента. " +
+                $"Установите пакет postgresql и убедитесь, что {binary} находится в PATH.", ex);
         }
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
-                $"{binary} --version returned exit code {process.ExitCode}. " +
-                $"Ensure the postgresql package is installed and {binary} is in PATH.");
+                $"{binary} --version вернул код {process.ExitCode}. " +
+                $"Убедитесь, что пакет postgresql установлен и {binary} находится в PATH.");
     }
 
     private void TryDeleteDirectory(string path)

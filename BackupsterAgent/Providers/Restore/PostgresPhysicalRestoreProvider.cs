@@ -258,8 +258,8 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
             {
                 var logContents = TryReadTextFile(startLog);
                 throw new InvalidOperationException(
-                    $"pg_ctl start exited with code {process.ExitCode} (timeout: {timeoutSeconds}s). " +
-                    $"Server log: {logContents}");
+                    $"pg_ctl start завершился с кодом {process.ExitCode} (таймаут: {timeoutSeconds}с). " +
+                    $"Лог сервера: {logContents}");
             }
         }
         catch
@@ -392,7 +392,7 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
             if (process.ExitCode != 0)
             {
                 var detail = string.IsNullOrEmpty(stderr) ? stdout : stderr;
-                throw new InvalidOperationException($"pg_ctl exited with code {process.ExitCode}: {detail}");
+                throw new InvalidOperationException($"pg_ctl завершился с кодом {process.ExitCode}: {detail}");
             }
         }
         catch (OperationCanceledException)
@@ -437,7 +437,7 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
                 var stderr = stderrTask.Result.Trim();
                 var stdout = stdoutTask.Result.Trim();
                 var detail = string.IsNullOrEmpty(stderr) ? stdout : stderr;
-                throw new InvalidOperationException($"tar extraction failed (exit code {process.ExitCode}): {detail}");
+                throw new InvalidOperationException($"Распаковка tar завершилась с ошибкой (код {process.ExitCode}): {detail}");
             }
         }
         catch (OperationCanceledException)

@@ -97,7 +97,7 @@ SELECT IS_SRVROLEMEMBER('sysadmin')      AS is_sysadmin,
         if (!File.Exists(agentFilePath))
         {
             throw new InvalidOperationException(
-                $"Backup file '{agentFilePath}' is not accessible from the agent host. " +
+                $"Файл бэкапа '{agentFilePath}' недоступен на хосте агента. " +
                 "Проверьте, что SharedBackupPath и AgentBackupPath указывают на один и тот же каталог.");
         }
 

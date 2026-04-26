@@ -137,7 +137,7 @@ FROM pg_roles WHERE rolname = current_user;";
         if (process.ExitCode != 0)
         {
             TryDeleteFile(outputFile);
-            var message = $"pg_dump exited with code {process.ExitCode}: {stderrContent.Trim()}";
+            var message = $"pg_dump завершился с кодом {process.ExitCode}: {stderrContent.Trim()}";
             _logger.LogError("pg_dump failed. ExitCode: {ExitCode}. Stderr: {Stderr}",
                 process.ExitCode, stderrContent.Trim());
             throw new InvalidOperationException(message);
@@ -181,14 +181,14 @@ FROM pg_roles WHERE rolname = current_user;";
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"{binary} is not available on this host. " +
-                $"Install the postgresql-client package and ensure {binary} is in PATH.", ex);
+                $"Бинарник {binary} недоступен на хосте агента. " +
+                $"Установите пакет postgresql-client и убедитесь, что {binary} находится в PATH.", ex);
         }
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
-                $"{binary} --version returned exit code {process.ExitCode}. " +
-                $"Ensure the postgresql-client package is installed and {binary} is in PATH.");
+                $"{binary} --version вернул код {process.ExitCode}. " +
+                $"Убедитесь, что пакет postgresql-client установлен и {binary} находится в PATH.");
     }
 
     private void TryDeleteFile(string path)

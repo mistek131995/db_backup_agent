@@ -154,7 +154,7 @@ WHERE TABLE_SCHEMA = @db;";
         if (process.ExitCode != 0)
         {
             TryDeleteFile(outputFile);
-            var message = $"mysqldump exited with code {process.ExitCode}: {stderrContent.Trim()}";
+            var message = $"mysqldump завершился с кодом {process.ExitCode}: {stderrContent.Trim()}";
             _logger.LogError("mysqldump failed. ExitCode: {ExitCode}. Stderr: {Stderr}",
                 process.ExitCode, stderrContent.Trim());
             throw new InvalidOperationException(message);
@@ -195,16 +195,16 @@ WHERE TABLE_SCHEMA = @db;";
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"{binary} is not available on this host. " +
-                "Install the mysql-client package, ensure mysqldump is in PATH, " +
-                "or set ConnectionConfig.BinPath to the directory containing MySQL client binaries.", ex);
+                $"Бинарник {binary} недоступен на хосте агента. " +
+                "Установите пакет mysql-client и убедитесь, что mysqldump находится в PATH " +
+                "(или задайте ConnectionConfig.BinPath с каталогом клиентских бинарников MySQL).", ex);
         }
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
-                $"{binary} --version returned exit code {process.ExitCode}. " +
-                "Ensure the mysql-client package is installed and mysqldump is in PATH " +
-                "(or set ConnectionConfig.BinPath).");
+                $"{binary} --version вернул код {process.ExitCode}. " +
+                "Убедитесь, что пакет mysql-client установлен и mysqldump находится в PATH " +
+                "(или задайте ConnectionConfig.BinPath).");
     }
 
     private static string BuildConnectionString(ConnectionConfig connection) =>

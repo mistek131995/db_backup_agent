@@ -157,7 +157,7 @@ WHERE TABLE_SCHEMA = @db;";
             var stderr = stderrTask.Result.Trim();
             var stdout = stdoutTask.Result.Trim();
             var detail = string.IsNullOrEmpty(stderr) ? stdout : stderr;
-            throw new InvalidOperationException($"mysql restore failed (exit code {process.ExitCode}): {detail}");
+            throw new InvalidOperationException($"mysql завершился с ошибкой (код {process.ExitCode}): {detail}");
         }
 
         _logger.LogInformation("MySQL restore completed for database '{Database}'", targetDatabase);
