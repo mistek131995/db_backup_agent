@@ -9,6 +9,9 @@ public sealed class MysqlPhysicalRestoreProvider : IRestoreProvider
         throw new RestorePermissionException(
             "Физический бэкап MySQL не поддерживается. По вопросам реализации обращайтесь: support@backupster.io");
 
+    public Task ValidateRestoreSourceAsync(ConnectionConfig connection, string restoreFilePath, CancellationToken ct) =>
+        Task.CompletedTask;
+
     public Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct) =>
         Task.CompletedTask;
 

@@ -52,6 +52,9 @@ WHERE TABLE_SCHEMA = @db;";
             $"Выдайте права: GRANT CREATE, DROP ON *.* TO '{connection.Username}'@'%'; FLUSH PRIVILEGES;.");
     }
 
+    public Task ValidateRestoreSourceAsync(ConnectionConfig connection, string restoreFilePath, CancellationToken ct) =>
+        Task.CompletedTask;
+
     public async Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
     {
         var quoted = QuoteIdentifier(targetDatabase);

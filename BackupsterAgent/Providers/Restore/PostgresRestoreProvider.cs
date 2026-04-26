@@ -52,6 +52,9 @@ FROM pg_roles WHERE rolname = current_user;";
             $"Выдайте права: ALTER ROLE \"{connection.Username}\" WITH CREATEDB; и GRANT pg_signal_backend TO \"{connection.Username}\";.");
     }
 
+    public Task ValidateRestoreSourceAsync(ConnectionConfig connection, string restoreFilePath, CancellationToken ct) =>
+        Task.CompletedTask;
+
     public async Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
     {
         var quoted = QuoteIdentifier(targetDatabase);

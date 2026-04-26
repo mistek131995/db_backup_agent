@@ -128,6 +128,8 @@ public sealed class DatabaseRestoreService
                     $"Unsupported DatabaseType: '{connection.DatabaseType}'. Supported: Postgres, Mssql, Mysql.");
             }
 
+            await provider.ValidateRestoreSourceAsync(connection, restoreFilePath, ct);
+
             reporter.Report(RestoreStage.PreparingDatabase);
             await provider.PrepareTargetDatabaseAsync(connection, targetDatabase, ct);
 

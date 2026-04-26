@@ -81,7 +81,7 @@ END";
         _logger.LogInformation("MSSQL target database '{Database}' prepared (dropped if existed)", targetDatabase);
     }
 
-    public async Task RestoreAsync(ConnectionConfig connection, string targetDatabase, string restoreFilePath, CancellationToken ct)
+    public async Task ValidateRestoreSourceAsync(ConnectionConfig connection, string restoreFilePath, CancellationToken ct)
     {
         var fileList = await GetFileListAsync(connection, restoreFilePath, ct);
 
@@ -94,7 +94,11 @@ END";
             throw new InvalidOperationException(
                 $"Бэкап-файл '{restoreFilePath}' не содержит data-файлов (тип D). " +
                 "Восстановление невозможно — файл повреждён или это не full backup.");
+    }
 
+    public async Task RestoreAsync(ConnectionConfig connection, string targetDatabase, string restoreFilePath, CancellationToken ct)
+    {
+        var fileList = await GetFileListAsync(connection, restoreFilePath, ct);
         var (dataPath, logPath) = await GetDefaultPathsAsync(connection, ct);
         var moveClauses = BuildMoveClauses(fileList, targetDatabase, dataPath, logPath);
 

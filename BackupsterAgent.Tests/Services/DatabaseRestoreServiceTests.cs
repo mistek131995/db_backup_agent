@@ -466,6 +466,12 @@ public sealed class DatabaseRestoreServiceTests
             return Task.CompletedTask;
         }
 
+        public Task ValidateRestoreSourceAsync(ConnectionConfig connection, string restoreFilePath, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
         public Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
         {
             PrepareCalls++;

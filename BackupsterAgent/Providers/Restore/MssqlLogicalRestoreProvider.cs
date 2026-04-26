@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using BackupsterAgent.Configuration;
 using BackupsterAgent.Exceptions;
 using Microsoft.Data.SqlClient;
@@ -47,6 +48,24 @@ SELECT
             throw new RestorePermissionException(
                 $"Пользователь '{connection.Username}' подключения '{connection.Name}' не имеет прав удалить существующую БД '{targetDatabase}' для перезаписи. " +
                 "Требуется членство в server-роли sysadmin, владение БД (db_owner) или CONTROL permission на эту БД.");
+    }
+
+    public Task ValidateRestoreSourceAsync(ConnectionConfig connection, string restoreFilePath, CancellationToken ct)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(restoreFilePath);
+            if (!archive.Entries.Any(e => e.FullName.Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException(
+                    $"Файл '{restoreFilePath}' не является корректным bacpac (нет [Content_Types].xml).");
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidOperationException(
+                $"Файл '{restoreFilePath}' повреждён или не является ZIP-контейнером bacpac: {ex.Message}");
+        }
+
+        return Task.CompletedTask;
     }
 
     public async Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
