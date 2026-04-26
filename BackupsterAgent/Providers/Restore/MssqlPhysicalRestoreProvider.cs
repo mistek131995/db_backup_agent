@@ -64,6 +64,17 @@ END";
     public async Task RestoreAsync(ConnectionConfig connection, string targetDatabase, string restoreFilePath, CancellationToken ct)
     {
         var fileList = await GetFileListAsync(connection, restoreFilePath, ct);
+
+        if (fileList.Count == 0)
+            throw new InvalidOperationException(
+                $"Бэкап-файл '{restoreFilePath}' повреждён: RESTORE FILELISTONLY вернул пустой список. " +
+                "Проверьте целостность файла в хранилище.");
+
+        if (!fileList.Any(f => f.Type == "D"))
+            throw new InvalidOperationException(
+                $"Бэкап-файл '{restoreFilePath}' не содержит data-файлов (тип D). " +
+                "Восстановление невозможно — файл повреждён или это не full backup.");
+
         var (dataPath, logPath) = await GetDefaultPathsAsync(connection, ct);
         var moveClauses = BuildMoveClauses(fileList, targetDatabase, dataPath, logPath);
 
