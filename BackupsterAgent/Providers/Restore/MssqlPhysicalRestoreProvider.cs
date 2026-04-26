@@ -46,9 +46,13 @@ SELECT IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin,
         var escapedName = targetDatabase.Replace("'", "''");
 
         var sql = $@"
-IF DB_ID(N'{escapedName}') IS NOT NULL
+DECLARE @state nvarchar(60);
+SELECT @state = state_desc FROM sys.databases WHERE name = N'{escapedName}';
+
+IF @state IS NOT NULL
 BEGIN
-    ALTER DATABASE {quoted} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    IF @state = 'ONLINE'
+        ALTER DATABASE {quoted} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
     DROP DATABASE {quoted};
 END";
 
