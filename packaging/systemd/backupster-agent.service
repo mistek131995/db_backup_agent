@@ -1,0 +1,27 @@
+[Unit]
+Description=Backupster Agent
+Documentation=https://backupster.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=backupster
+Group=backupster
+WorkingDirectory=/var/lib/backupster-agent
+ExecStart=/usr/bin/backupster-agent
+EnvironmentFile=-/etc/backupster-agent/env
+Environment=CONFIG_PATH=/var/lib/backupster-agent/config
+Environment=RestoreSettings__TempPath=/var/lib/backupster-agent/temp
+Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/backupster-agent
+
+[Install]
+WantedBy=multi-user.target

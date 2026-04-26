@@ -41,6 +41,54 @@ jobs:
           name: BackupsterAgent-${{ matrix.rid }}
           path: BackupsterAgent-${{ github.ref_name }}-${{ matrix.rid }}.zip
 
+  # ── Linux packages (.deb + .rpm via nfpm) ────────────────────────────────────
+  package-linux:
+    name: Package (.deb + .rpm)
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download linux-x64 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: BackupsterAgent-linux-x64
+          path: ./
+
+      - name: Unzip linux-x64 archive
+        run: |
+          mkdir -p ./publish/linux-x64
+          unzip -o BackupsterAgent-${{ github.ref_name }}-linux-x64.zip -d ./publish/linux-x64
+
+      - name: Install nfpm
+        run: |
+          NFPM_VERSION=2.41.0
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build .deb
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: nfpm pkg --packager deb --config BackupsterAgent/packaging/nfpm.yaml --target ./
+
+      - name: Build .rpm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: nfpm pkg --packager rpm --config BackupsterAgent/packaging/nfpm.yaml --target ./
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: BackupsterAgent-linux-packages
+          path: |
+            *.deb
+            *.rpm
+
   # ── Docker image → ghcr.io ───────────────────────────────────────────────────
   docker:
     name: Docker
@@ -85,7 +133,7 @@ jobs:
   # ── GitHub Release with artifacts ───────────────────────────────────────────
   release:
     name: Release
-    needs: [build, docker]
+    needs: [build, docker, package-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -106,6 +154,6 @@ jobs:
             --title "Release ${{ github.ref_name }}" \
             --generate-notes \
             $PRERELEASE_FLAG \
-            artifacts/*.zip
+            artifacts/*.zip artifacts/*.deb artifacts/*.rpm
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
