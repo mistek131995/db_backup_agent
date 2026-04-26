@@ -17,13 +17,23 @@ public sealed class MssqlPhysicalRestoreProvider : IRestoreProvider
     public async Task ValidatePermissionsAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
     {
         const string sql = @"
-SELECT IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin,
-       IS_SRVROLEMEMBER('dbcreator') AS is_dbcreator;";
+SELECT
+    IS_SRVROLEMEMBER('sysadmin')  AS is_sysadmin,
+    IS_SRVROLEMEMBER('dbcreator') AS is_dbcreator,
+    CAST(CASE WHEN DB_ID(@db) IS NULL THEN 0 ELSE 1 END AS bit) AS target_exists,
+    CAST(CASE
+        WHEN DB_ID(@db) IS NULL THEN 1
+        WHEN IS_SRVROLEMEMBER('sysadmin') = 1 THEN 1
+        WHEN EXISTS (SELECT 1 FROM sys.databases WHERE name = @db AND owner_sid = SUSER_SID()) THEN 1
+        WHEN HAS_PERMS_BY_NAME(@db, 'DATABASE', 'CONTROL') = 1 THEN 1
+        ELSE 0
+    END AS bit) AS can_drop_existing;";
 
         await using var conn = new SqlConnection(BuildMasterConnectionString(connection));
         await conn.OpenAsync(ct);
 
         await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@db", targetDatabase);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
 
         if (!await reader.ReadAsync(ct))
@@ -31,13 +41,19 @@ SELECT IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin,
 
         var isSysadmin = reader.GetInt32(0) == 1;
         var isDbcreator = reader.GetInt32(1) == 1;
+        var targetExists = reader.GetBoolean(2);
+        var canDropExisting = reader.GetBoolean(3);
 
-        if (isSysadmin || isDbcreator) return;
+        if (!isSysadmin && !isDbcreator)
+            throw new RestorePermissionException(
+                $"Пользователь '{connection.Username}' подключения '{connection.Name}' не имеет прав для восстановления БД '{targetDatabase}'. " +
+                "Требуется членство в server-роли sysadmin или dbcreator. " +
+                $"Выдайте права: ALTER SERVER ROLE dbcreator ADD MEMBER [{connection.Username}];.");
 
-        throw new RestorePermissionException(
-            $"Пользователь '{connection.Username}' подключения '{connection.Name}' не имеет прав для восстановления БД '{targetDatabase}'. " +
-            "Требуется членство в server-роли sysadmin или dbcreator. " +
-            $"Выдайте права: ALTER SERVER ROLE dbcreator ADD MEMBER [{connection.Username}];.");
+        if (targetExists && !canDropExisting)
+            throw new RestorePermissionException(
+                $"Пользователь '{connection.Username}' подключения '{connection.Name}' не имеет прав удалить существующую БД '{targetDatabase}' для перезаписи. " +
+                "Требуется членство в server-роли sysadmin, владение БД (db_owner) или CONTROL permission на эту БД.");
     }
 
     public async Task PrepareTargetDatabaseAsync(ConnectionConfig connection, string targetDatabase, CancellationToken ct)
