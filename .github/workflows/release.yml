@@ -74,12 +74,12 @@ jobs:
       - name: Build .deb
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: nfpm pkg --packager deb --config BackupsterAgent/packaging/nfpm.yaml --target ./
+        run: nfpm pkg --packager deb --config packaging/nfpm.yaml --target ./
 
       - name: Build .rpm
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: nfpm pkg --packager rpm --config BackupsterAgent/packaging/nfpm.yaml --target ./
+        run: nfpm pkg --packager rpm --config packaging/nfpm.yaml --target ./
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7

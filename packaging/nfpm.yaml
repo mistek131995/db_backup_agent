@@ -19,12 +19,12 @@ contents:
     file_info:
       mode: 0755
 
-  - src: ./BackupsterAgent/packaging/systemd/backupster-agent.service
+  - src: ./packaging/systemd/backupster-agent.service
     dst: /usr/lib/systemd/system/backupster-agent.service
     file_info:
       mode: 0644
 
-  - src: ./BackupsterAgent/packaging/etc/env.example
+  - src: ./packaging/etc/env.example
     dst: /etc/backupster-agent/env
     type: config|noreplace
     file_info:
@@ -32,16 +32,16 @@ contents:
       owner: root
       group: root
 
-  - src: ./BackupsterAgent/LICENSE
+  - src: ./LICENSE
     dst: /usr/share/doc/backupster-agent/LICENSE
 
-  - src: ./BackupsterAgent/NOTICE
+  - src: ./NOTICE
     dst: /usr/share/doc/backupster-agent/NOTICE
 
 scripts:
-  postinstall: ./BackupsterAgent/packaging/scripts/postinst.sh
-  preremove: ./BackupsterAgent/packaging/scripts/prerm.sh
-  postremove: ./BackupsterAgent/packaging/scripts/postrm.sh
+  postinstall: ./packaging/scripts/postinst.sh
+  preremove: ./packaging/scripts/prerm.sh
+  postremove: ./packaging/scripts/postrm.sh
 
 overrides:
   rpm:
