@@ -42,9 +42,3 @@ scripts:
   postinstall: ./packaging/scripts/postinst.sh
   preremove: ./packaging/scripts/prerm.sh
   postremove: ./packaging/scripts/postrm.sh
-
-overrides:
-  rpm:
-    file_name_template: "backupster-agent-{{ .Version }}.x86_64"
-  deb:
-    file_name_template: "backupster-agent_{{ .Version }}_amd64"
