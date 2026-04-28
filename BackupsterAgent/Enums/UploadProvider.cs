@@ -4,4 +4,5 @@ public enum UploadProvider
 {
     S3,
     Sftp,
+    AzureBlob,
 }

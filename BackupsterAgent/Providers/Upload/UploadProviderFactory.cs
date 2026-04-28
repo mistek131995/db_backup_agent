@@ -39,6 +39,10 @@ public sealed class UploadProviderFactory : IUploadProviderFactory
                 storage.Sftp ?? throw new InvalidOperationException(
                     $"Storage '{storageName}' has Provider=Sftp but Sftp settings are missing."),
                 _loggerFactory.CreateLogger<SftpUploadProvider>()),
+            UploadProvider.AzureBlob => new AzureBlobUploadProvider(
+                storage.AzureBlob ?? throw new InvalidOperationException(
+                    $"Storage '{storageName}' has Provider=AzureBlob but AzureBlob settings are missing."),
+                _loggerFactory.CreateLogger<AzureBlobUploadProvider>()),
             _ => throw new InvalidOperationException(
                 $"Storage '{storageName}' has unknown provider: {storage.Provider}"),
         };

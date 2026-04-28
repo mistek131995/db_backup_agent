@@ -8,4 +8,5 @@ public sealed class StorageConfig
     public UploadProvider Provider { get; init; } = UploadProvider.S3;
     public S3Settings? S3 { get; init; }
     public SftpSettings? Sftp { get; init; }
+    public AzureBlobSettings? AzureBlob { get; init; }
 }

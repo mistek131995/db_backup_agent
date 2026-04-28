@@ -112,7 +112,7 @@ public sealed class ChunkGcWorker : BackgroundService
             if (ct.IsCancellationRequested) break;
 
             var storage = _storages.Resolve(name);
-            if (storage.Provider != UploadProvider.S3)
+            if (storage.Provider != UploadProvider.S3 && storage.Provider != UploadProvider.AzureBlob)
             {
                 _logger.LogDebug(
                     "ChunkGc: skipping storage '{Storage}' — provider {Provider} has no chunk pool.",
