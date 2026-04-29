@@ -163,6 +163,67 @@ public sealed class BackupJobRunTests
         Assert.That(outbox, Is.Empty);
     }
 
+    [Test]
+    public async Task RunAsync_DumpFails_FinalizesWithFailedStatus()
+    {
+        var serverId = Guid.NewGuid();
+        _recordClient.NextOpen = new OpenRecordResult(DashboardAvailability.Ok, serverId);
+        _recordClient.NextFinalize = new FinalizeRecordResult(DashboardAvailability.Ok);
+        _provider.ThrowOnBackup = new InvalidOperationException("pg_dump failed: connection refused");
+
+        var result = await BuildJob().RunAsync(Config(), BackupMode.Logical, CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.False);
+            Assert.That(_recordClient.FinalizeCalls, Is.EqualTo(1));
+            Assert.That(_recordClient.LastFinalize!.Status, Is.EqualTo(BackupStatus.Failed));
+        });
+
+        var outbox = await _outboxStore.ListAsync(CancellationToken.None);
+        Assert.That(outbox, Is.Empty, "pipeline exception must not produce an outbox entry");
+    }
+
+    [Test]
+    public async Task RunAsync_UploadFails_FinalizesWithFailedStatus_AndCleansLocalFiles()
+    {
+        var serverId = Guid.NewGuid();
+        _recordClient.NextOpen = new OpenRecordResult(DashboardAvailability.Ok, serverId);
+        _recordClient.NextFinalize = new FinalizeRecordResult(DashboardAvailability.Ok);
+        _uploader.ThrowOnUploadFile = new IOException("S3 network error");
+
+        var result = await BuildJob().RunAsync(Config(), BackupMode.Logical, CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.False);
+            Assert.That(_recordClient.FinalizeCalls, Is.EqualTo(1));
+            Assert.That(_recordClient.LastFinalize!.Status, Is.EqualTo(BackupStatus.Failed));
+        });
+
+        Assert.That(Directory.GetFiles(_tempRoot), Is.Empty,
+            "dump and .enc files must be deleted even on upload failure");
+    }
+
+    [Test]
+    public async Task RunAsync_PermissionValidationFails_FinalizesWithFailedStatus()
+    {
+        var serverId = Guid.NewGuid();
+        _recordClient.NextOpen = new OpenRecordResult(DashboardAvailability.Ok, serverId);
+        _recordClient.NextFinalize = new FinalizeRecordResult(DashboardAvailability.Ok);
+        _provider.ThrowOnValidate = new UnauthorizedAccessException("pg_dump: permission denied");
+
+        var result = await BuildJob().RunAsync(Config(), BackupMode.Logical, CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.False);
+            Assert.That(_recordClient.FinalizeCalls, Is.EqualTo(1));
+            Assert.That(_recordClient.LastFinalize!.Status, Is.EqualTo(BackupStatus.Failed));
+            Assert.That(_provider.BackupCalls, Is.Zero, "backup must not run if validation fails");
+        });
+    }
+
     private static DatabaseConfig Config() => new()
     {
         ConnectionName = "pg-main",
@@ -216,15 +277,19 @@ public sealed class BackupJobRunTests
     private sealed class StubBackupProvider(string tempRoot) : IBackupProvider
     {
         public int BackupCalls { get; private set; }
+        public Exception? ThrowOnValidate { get; set; }
+        public Exception? ThrowOnBackup { get; set; }
 
         public Task ValidatePermissionsAsync(ConnectionConfig connection, string database, CancellationToken ct)
         {
+            if (ThrowOnValidate is not null) throw ThrowOnValidate;
             return Task.CompletedTask;
         }
 
         public async Task<BackupResult> BackupAsync(DatabaseConfig config, ConnectionConfig connection, CancellationToken ct)
         {
             BackupCalls++;
+            if (ThrowOnBackup is not null) throw ThrowOnBackup;
             var path = Path.Combine(tempRoot, $"dump-{Guid.NewGuid():N}.sql.gz");
             await File.WriteAllBytesAsync(path, new byte[] { 1, 2, 3, 4, 5 }, ct);
             return new BackupResult
@@ -249,8 +314,13 @@ public sealed class BackupJobRunTests
 
     private sealed class FakeRecordingUploadProvider : IUploadProvider
     {
-        public Task<string> UploadAsync(string filePath, string folder, IProgress<long>? progress, CancellationToken ct) =>
-            Task.FromResult($"fake://{folder}/{Path.GetFileName(filePath)}");
+        public Exception? ThrowOnUploadFile { get; set; }
+
+        public Task<string> UploadAsync(string filePath, string folder, IProgress<long>? progress, CancellationToken ct)
+        {
+            if (ThrowOnUploadFile is not null) throw ThrowOnUploadFile;
+            return Task.FromResult($"fake://{folder}/{Path.GetFileName(filePath)}");
+        }
 
         public Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct) => Task.CompletedTask;
 
