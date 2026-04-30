@@ -9,4 +9,5 @@ public sealed class StorageConfig
     public S3Settings? S3 { get; init; }
     public SftpSettings? Sftp { get; init; }
     public AzureBlobSettings? AzureBlob { get; init; }
+    public WebDavSettings? WebDav { get; init; }
 }

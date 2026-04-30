@@ -43,6 +43,10 @@ public sealed class UploadProviderFactory : IUploadProviderFactory
                 storage.AzureBlob ?? throw new InvalidOperationException(
                     $"Storage '{storageName}' has Provider=AzureBlob but AzureBlob settings are missing."),
                 _loggerFactory.CreateLogger<AzureBlobUploadProvider>()),
+            UploadProvider.WebDav => new WebDavUploadProvider(
+                storage.WebDav ?? throw new InvalidOperationException(
+                    $"Storage '{storageName}' has Provider=WebDav but WebDav settings are missing."),
+                _loggerFactory.CreateLogger<WebDavUploadProvider>()),
             _ => throw new InvalidOperationException(
                 $"Storage '{storageName}' has unknown provider: {storage.Provider}"),
         };

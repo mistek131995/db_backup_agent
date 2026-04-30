@@ -37,17 +37,18 @@ public sealed class FileSetBackupPipeline
         var startedAt = exec.StartedAt;
         var storage = _storages.Resolve(config.StorageName);
 
-        if (storage.Provider == UploadProvider.Sftp)
+        if (storage.Provider is UploadProvider.Sftp or UploadProvider.WebDav)
         {
-            const string englishError = "File backup is not supported on SFTP storage. Configure an S3 storage for this file set.";
+            var providerLabel = storage.Provider == UploadProvider.Sftp ? "SFTP" : "WebDAV";
+            var englishError = $"File backup is not supported on {providerLabel} storage. Configure an S3 or Azure Blob storage for this file set.";
             _logger.LogWarning(
-                "FileSetBackupPipeline: SFTP storage '{Storage}' is not supported for file sets. FileSet '{Name}' skipped.",
-                storage.Name, config.Name);
+                "FileSetBackupPipeline: {Provider} storage '{Storage}' is not supported for file sets. FileSet '{Name}' skipped.",
+                providerLabel, storage.Name, config.Name);
             return new PipelineOutcome
             {
                 Success = false,
                 ErrorMessage = englishError,
-                FileBackupError = "Бэкап файлов не поддерживается на SFTP-хранилище. Настройте S3-хранилище для этого набора файлов.",
+                FileBackupError = $"Бэкап файлов не поддерживается на {providerLabel}-хранилище. Настройте S3- или Azure Blob-хранилище для этого набора файлов.",
             };
         }
 
