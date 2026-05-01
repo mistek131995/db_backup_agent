@@ -28,6 +28,27 @@ public sealed class LocalFsUploadProvider : IUploadProvider
             throw new InvalidOperationException(
                 $"LocalFsSettings.RemotePath '{_settings.RemotePath}' не является корректным путём: {ex.Message}", ex);
         }
+
+        if (File.Exists(_basePath))
+            throw new InvalidOperationException(
+                $"LocalFsSettings.RemotePath '{_basePath}' указывает на существующий файл, а не на каталог. " +
+                "Укажите путь к каталогу для бэкапов.");
+
+        try
+        {
+            Directory.CreateDirectory(_basePath);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new InvalidOperationException(
+                $"Нет прав на создание каталога '{_basePath}'. " +
+                "Проверьте, что у пользователя агента есть права на запись по этому пути.", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException(
+                $"Не удалось подготовить каталог '{_basePath}': {ex.Message}", ex);
+        }
     }
 
     public async Task<string> UploadAsync(string filePath, string folder, IProgress<long>? progress, CancellationToken ct)
@@ -197,10 +218,24 @@ public sealed class LocalFsUploadProvider : IUploadProvider
         string prefix,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var rootPath = string.IsNullOrEmpty(prefix) ? _basePath : ResolveLocalPath(prefix);
-        EnsureUnderBase(rootPath);
+        string searchRoot;
+        string keyFilter;
 
-        if (!Directory.Exists(rootPath))
+        if (string.IsNullOrEmpty(prefix) || prefix.EndsWith('/'))
+        {
+            searchRoot = string.IsNullOrEmpty(prefix) ? _basePath : ResolveLocalPath(prefix);
+            keyFilter = string.Empty;
+        }
+        else
+        {
+            var lastSlash = prefix.LastIndexOf('/');
+            searchRoot = lastSlash < 0 ? _basePath : ResolveLocalPath(prefix[..lastSlash]);
+            keyFilter = prefix;
+        }
+
+        EnsureUnderBase(searchRoot);
+
+        if (!Directory.Exists(searchRoot))
             yield break;
 
         var enumOptions = new EnumerationOptions
@@ -210,12 +245,17 @@ public sealed class LocalFsUploadProvider : IUploadProvider
             ReturnSpecialDirectories = false,
         };
 
-        foreach (var fullPath in Directory.EnumerateFiles(rootPath, "*", enumOptions))
+        foreach (var fullPath in Directory.EnumerateFiles(searchRoot, "*", enumOptions))
         {
             ct.ThrowIfCancellationRequested();
 
             if (fullPath.EndsWith(".upload-tmp", StringComparison.Ordinal) ||
                 fullPath.EndsWith(".download-tmp", StringComparison.Ordinal))
+                continue;
+
+            var key = ToObjectKey(fullPath);
+
+            if (keyFilter.Length > 0 && !key.StartsWith(keyFilter, StringComparison.Ordinal))
                 continue;
 
             FileInfo info;
@@ -231,7 +271,7 @@ public sealed class LocalFsUploadProvider : IUploadProvider
             }
 
             yield return new StorageObject(
-                Key: ToObjectKey(fullPath),
+                Key: key,
                 LastModifiedUtc: info.LastWriteTimeUtc,
                 Size: info.Length);
         }
