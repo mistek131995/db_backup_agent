@@ -99,7 +99,7 @@
 - `Name` подключения и `Name` хранилища должны быть уникальны в пределах своих списков.
 - `ConnectionName` и `StorageName` у БД обязаны ссылаться на существующие записи — иначе эта БД будет пропущена с ошибкой в логе, остальные продолжат работать.
 - `OutputPath` — папка для временных файлов дампа. Файлы удаляются после загрузки.
-- `FilePaths` — список путей к файлам или директориям для файлового бэкапа. Директории обходятся рекурсивно. Файлы режутся на content-defined chunks (FastCDC, ~4 МиБ) и дедуплицируются внутри одного хранилища. Работает на S3 и Azure Blob (object-storage с нативным `HEAD` и префикс-листингом). На SFTP и WebDAV дамп загрузится, файлы пропустятся с warning. Поле необязательное.
+- `FilePaths` — список путей к файлам или директориям для файлового бэкапа. Директории обходятся рекурсивно. Файлы режутся на content-defined chunks (FastCDC, ~4 МиБ) и дедуплицируются внутри одного хранилища. Работает на S3, Azure Blob и LocalFs (везде, где есть дешёвый `HEAD`/листинг для дедупа). На SFTP и WebDAV дамп загрузится, файлы пропустятся с warning. Поле необязательное.
 - `SharedBackupPath` / `AgentBackupPath` — **только для MSSQL**, подробнее — в [mssql.md](mssql.md). Для Postgres и MySQL поля не используются.
 - `BinPath` — **для PostgreSQL и MySQL**, необязательное. Каталог с клиентскими бинарниками: `pg_dump`/`pg_basebackup`/`psql`/`pg_ctl` для PG, `mysqldump`/`mysql` для MySQL. Override авто-резолва. По умолчанию агент сам ищет клиент: для PG — под мажорную версию сервера (реестр Windows + стандартные каталоги установки → `PATH`); для MySQL — `C:\Program Files\MySQL\MySQL Server *\bin` (высшая версия) / `/usr/local/mysql/bin` → `PATH`. Задавайте поле только при нестандартной установке, когда авто-резолв не находит нужный каталог, либо когда `PATH` Windows-службы не содержит MySQL/PG bin (типичный случай — инсталлятор положил каталог только в `User PATH`). Для MSSQL поле не используется. Подробнее — [postgres.md](postgres.md), [mysql.md](mysql.md).
 
@@ -340,12 +340,14 @@ AgentSettings__DashboardUrl=http://your-server:8080
 
 ```
 {database}/{yyyy-MM-dd_HH-mm-ss}/
-  {database}_{yyyyMMdd_HHmmss}.sql.gz.enc    ← PostgreSQL / MySQL дамп
-  {database}_{yyyyMMdd_HHmmss}.bak.enc       ← MSSQL дамп
+  {database}_{yyyyMMdd_HHmmss}.sql.gz.enc    ← PostgreSQL / MySQL дамп (logical)
+  {database}_{yyyyMMdd_HHmmss}.tar.gz.enc    ← PostgreSQL physical (pg_basebackup, архив PGDATA + WAL)
+  {database}_{yyyyMMdd_HHmmss}.bacpac.enc    ← MSSQL дамп (logical, через DacFx)
+  {database}_{yyyyMMdd_HHmmss}.bak.enc       ← MSSQL дамп (physical, через BACKUP DATABASE)
   manifest.json.gz.enc                       ← манифест файлового бэкапа (если FilePaths непуст)
   manifest.json.enc                          ← легаси-формат старых бэкапов (читается новым агентом)
 
-chunks/{sha256}                              ← общий пул дедуплицированных чанков (S3 only)
+chunks/{sha256}                              ← общий пул дедуплицированных чанков (S3 / Azure Blob / LocalFs)
 ```
 
 Манифест нового формата — gzip-сжатый JSON, зашифрованный framed-GCM; reader стримит его через `PipeReader` + `Utf8JsonReader` без полного разворачивания в RAM. Это позволяет бэкапить и восстанавливать файловые хранилища с миллионами мелких файлов без всплеска памяти.

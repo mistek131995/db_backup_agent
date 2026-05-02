@@ -195,7 +195,7 @@ Override бьёт всё остальное — ни сервер, ни реес
 **Кластер не должен быть под управлением service manager'а (только для restore).**
 Перед swap'ом restore-провайдер читает PID из `postmaster.pid` и проверяет:
 - Linux: `/proc/<pid>/cgroup` — если PID живёт в `system.slice/<имя>.service`, кластером управляет systemd;
-- Windows: `tasklist /svc /fi "PID eq <pid>"` — если процесс хостится сервисом, в выводе будет имя сервиса.
+- Windows: PowerShell `Get-CimInstance Win32_Service -Filter 'ProcessId=<pid>'` — если процесс хостится сервисом, поле `Name` будет непустым.
 
 Если детектор сработал — задача отвергается до любых действий с диском, кластер продолжает работать. Сообщение содержит конкретное имя юнита/сервиса и команды для отключения автозапуска (`systemctl disable …` / `Set-Service … -StartupType Manual`). Причина: между нашим `pg_ctl stop` и `Directory.Move` сервис-менеджер с `Restart=always` (или Recovery → Restart на Windows) может попытаться перезапустить postmaster, гонка ловит swap в самый неудачный момент. Плюс после успешного restore наш `pg_ctl start`-нутый postmaster живёт **вне** управления сервиса — `systemctl status` врёт, а попытка `systemctl start` поднимает второй экземпляр и валится.
 

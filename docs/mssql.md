@@ -46,10 +46,18 @@
 **Требования**
 
 - TDS-доступ к SQL Server.
-- Пользователь в `ConnectionConfig` имеет привилегию `dbcreator` на уровне сервера (для создания базы):
+- Для **создания** target-БД: `sysadmin` (server-level) или `dbcreator` (server-level).
+- Для **DROP существующей** target-БД (если она уже есть): `sysadmin`, владение БД (`db_owner`), либо `CONTROL` permission на этой БД. Если target ещё не существует — это требование снимается автоматически.
 
   ```sql
+  -- Право на создание новых БД
   ALTER SERVER ROLE dbcreator ADD MEMBER backup_user;
+
+  -- Право на удаление существующей target (один из вариантов)
+  USE [mydb];
+  ALTER ROLE db_owner ADD MEMBER backup_user;
+  -- или явно:
+  -- GRANT CONTROL ON DATABASE::[mydb] TO backup_user;
   ```
 
 **Что нужно знать**
@@ -113,10 +121,16 @@
 - SQL Server должен иметь право **писать** в `SharedBackupPath` (для backup) и **читать** оттуда (для restore).
 - Агент должен иметь право **читать** из `AgentBackupPath` (для upload) и **писать** туда (для restore — он кладёт туда расшифрованный `.bak` перед `RESTORE`).
 - TDS-доступ к SQL Server.
-- Пользователь в `ConnectionConfig` имеет роль `db_backupoperator` или является `sysadmin`:
+- Пользователь в `ConnectionConfig` входит в одну из ролей: `sysadmin` (server-level), `db_owner` или `db_backupoperator` (database-level целевой БД). Любого одного достаточно.
 
   ```sql
-  ALTER SERVER ROLE db_backupoperator ADD MEMBER backup_user;
+  -- Вариант 1: db_backupoperator целевой БД
+  USE [mydb];
+  ALTER ROLE db_backupoperator ADD MEMBER backup_user;
+
+  -- Вариант 2: владелец целевой БД
+  USE [mydb];
+  ALTER ROLE db_owner ADD MEMBER backup_user;
   ```
 
 ### Восстановление
@@ -130,7 +144,8 @@
 **Требования**
 
 - Тот же общий каталог, что и для бэкапа (см. выше).
-- Пользователь в `ConnectionConfig` имеет роль `sysadmin` или `dbcreator` + `db_backupoperator` на уровне сервера.
+- Для **создания** target-БД: `sysadmin` (server-level) или `dbcreator` (server-level).
+- Для **DROP существующей** target-БД: `sysadmin`, владение БД (`db_owner`), либо `CONTROL` permission. Если target ещё не существует — снимается автоматически. Примеры команд — те же, что для logical restore выше.
 
 **Сценарии развёртывания**
 
