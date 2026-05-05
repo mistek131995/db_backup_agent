@@ -189,7 +189,11 @@ public sealed class AzureBlobUploadProvider : IUploadProvider
         var client = GetClient();
         var blobsPrefix = string.IsNullOrEmpty(prefix) ? null : prefix;
 
-        await foreach (var item in client.GetBlobsAsync(prefix: blobsPrefix, cancellationToken: ct))
+        await foreach (var item in client.GetBlobsAsync(
+            traits: BlobTraits.None,
+            states: BlobStates.None,
+            prefix: blobsPrefix,
+            cancellationToken: ct))
         {
             var lastModified = item.Properties.LastModified is { } lm
                 ? lm.UtcDateTime
