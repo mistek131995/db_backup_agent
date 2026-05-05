@@ -11,6 +11,9 @@ namespace BackupsterAgent.Providers.Restore;
 
 public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
 {
+    private const string MarkerFileName = ".backupster-marker";
+    private const int OrphanGraceHours = 48;
+
     private readonly ILogger<PostgresPhysicalRestoreProvider> _logger;
     private readonly PostgresBinaryResolver _binaryResolver;
     private readonly RestoreSettings _restoreSettings;
@@ -41,6 +44,16 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
                 $"Каталог PGDATA '{_pgDataPath}' недоступен на хосте агента. " +
                 "Физическое восстановление требует, чтобы агент и PostgreSQL выполнялись на одном хосте.");
 
+        var realPgDataPath = ResolveRealPath(_pgDataPath);
+        if (!string.Equals(realPgDataPath, _pgDataPath, StringComparison.Ordinal))
+            _logger.LogInformation(
+                "PGDATA '{PgDataPath}' resolves to real path '{RealPath}'. " +
+                "Staging/swap operations during restore will use the real parent directory.",
+                _pgDataPath, realPgDataPath);
+
+        var (parent, _) = SplitPgDataPath(realPgDataPath);
+        EnsureSameFsRename(parent, realPgDataPath);
+
         await EnsureClusterIsNotServiceManagedAsync(_pgDataPath, ct);
     }
 
@@ -57,7 +70,11 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
         var pgDataPath = _pgDataPath!;
         var pgCtl = _pgCtlPath ?? await _binaryResolver.ResolveAsync(connection, "pg_ctl", ct);
 
-        var (parent, leaf) = SplitPgDataPath(pgDataPath);
+        var realPgDataPath = ResolveRealPath(pgDataPath);
+        var (parent, leaf) = SplitPgDataPath(realPgDataPath);
+
+        CleanupOrphanStagingDirs(parent, leaf);
+
         var guid = Guid.NewGuid().ToString("N")[..8];
         var stagingPath = Path.Combine(parent, $"{leaf}.new-{guid}");
         var oldPath = Path.Combine(parent, $"{leaf}.old-{guid}");
@@ -65,6 +82,7 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
         var startLog = Path.Combine(Path.GetTempPath(), $"backupster-pg-start-{Guid.NewGuid():N}.log");
 
         Directory.CreateDirectory(stagingPath);
+        WriteMarkerFile(stagingPath);
 
         try
         {
@@ -75,6 +93,8 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
                 await ExtractTarGzAsync(restoreFilePath, stagingPath, ct);
                 await VerifyStagedClusterAsync(stagingPath, pgCtl, ct);
                 _logger.LogInformation("Staged cluster verified at '{StagingPath}'", stagingPath);
+
+                EnsureSameFsRename(parent, realPgDataPath);
             }
             catch
             {
@@ -96,8 +116,8 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
 
             try
             {
-                Directory.Move(pgDataPath, oldPath);
-                Directory.Move(stagingPath, pgDataPath);
+                Directory.Move(realPgDataPath, oldPath);
+                Directory.Move(stagingPath, realPgDataPath);
 
                 _logger.LogInformation(
                     "Starting PostgreSQL cluster at '{PgDataPath}' (server log → '{LogFile}')", pgDataPath, startLog);
@@ -108,7 +128,7 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
             }
             catch (Exception swapException)
             {
-                await RecoverClusterAsync(pgCtl, pgDataPath, stagingPath, oldPath, failedPath, swapException);
+                await RecoverClusterAsync(pgCtl, pgDataPath, realPgDataPath, stagingPath, oldPath, failedPath, swapException);
                 throw new InvalidOperationException(
                     $"Восстановление не удалось ({swapException.Message}). " +
                     "Кластер возвращён в исходное состояние и запущен.",
@@ -122,13 +142,14 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
     }
 
     private async Task RecoverClusterAsync(
-        string pgCtl, string pgDataPath, string stagingPath, string oldPath, string failedPath,
+        string pgCtl, string pgDataPath, string realPgDataPath, string stagingPath, string oldPath, string failedPath,
         Exception originalException)
     {
         _logger.LogError(originalException,
-            "Restore swap failed at PGDATA '{PgDataPath}'. Attempting recovery.", pgDataPath);
+            "Restore swap failed at PGDATA '{PgDataPath}' (real path '{RealPath}'). Attempting recovery.",
+            pgDataPath, realPgDataPath);
 
-        var pgdataExists = Directory.Exists(pgDataPath);
+        var pgdataExists = Directory.Exists(realPgDataPath);
         var oldExists = Directory.Exists(oldPath);
 
         string? rollbackError = null;
@@ -138,31 +159,31 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
             _logger.LogWarning(
                 "Both PGDATA and backup copy exist. Moving new → '{FailedPath}', restoring backup.", failedPath);
 
-            if (!await TryMoveDirectoryWithRetryAsync(pgCtl, pgDataPath, failedPath))
+            if (!await TryMoveDirectoryWithRetryAsync(pgCtl, realPgDataPath, failedPath))
                 rollbackError =
-                    $"новый кластер '{pgDataPath}' не удалось переместить в '{failedPath}'. " +
-                    $"Восстановите вручную: переместите '{pgDataPath}' в безопасное место, затем '{oldPath}' в '{pgDataPath}'.";
-            else if (!await TryMoveDirectoryWithRetryAsync(pgCtl, oldPath, pgDataPath))
+                    $"новый кластер '{realPgDataPath}' не удалось переместить в '{failedPath}'. " +
+                    $"Восстановите вручную: переместите '{realPgDataPath}' в безопасное место, затем '{oldPath}' в '{realPgDataPath}'.";
+            else if (!await TryMoveDirectoryWithRetryAsync(pgCtl, oldPath, realPgDataPath))
                 rollbackError =
-                    $"исходный кластер '{oldPath}' не удалось вернуть в '{pgDataPath}'. " +
-                    $"Восстановите вручную: переместите '{oldPath}' в '{pgDataPath}'.";
+                    $"исходный кластер '{oldPath}' не удалось вернуть в '{realPgDataPath}'. " +
+                    $"Восстановите вручную: переместите '{oldPath}' в '{realPgDataPath}'.";
         }
         else if (oldExists && !pgdataExists)
         {
             _logger.LogWarning("PGDATA missing, backup at '{OldPath}'. Restoring.", oldPath);
-            if (!await TryMoveDirectoryWithRetryAsync(pgCtl, oldPath, pgDataPath))
+            if (!await TryMoveDirectoryWithRetryAsync(pgCtl, oldPath, realPgDataPath))
                 rollbackError =
-                    $"исходный кластер '{oldPath}' не удалось вернуть в '{pgDataPath}'. " +
-                    $"Восстановите вручную: переместите '{oldPath}' в '{pgDataPath}'.";
+                    $"исходный кластер '{oldPath}' не удалось вернуть в '{realPgDataPath}'. " +
+                    $"Восстановите вручную: переместите '{oldPath}' в '{realPgDataPath}'.";
         }
         else if (pgdataExists && !oldExists)
         {
-            _logger.LogInformation("PGDATA at '{PgDataPath}' intact, no swap occurred.", pgDataPath);
+            _logger.LogInformation("PGDATA at '{RealPath}' intact, no swap occurred.", realPgDataPath);
         }
         else
         {
             rollbackError =
-                $"PGDATA '{pgDataPath}' и резервная копия '{oldPath}' оба отсутствуют. " +
+                $"PGDATA '{realPgDataPath}' и резервная копия '{oldPath}' оба отсутствуют. " +
                 "Данные могут быть утеряны. Проверьте файловую систему и логи агента.";
         }
 
@@ -460,6 +481,142 @@ public sealed class PostgresPhysicalRestoreProvider : IRestoreProvider
             throw new InvalidOperationException(
                 $"Не удалось разобрать путь PGDATA '{path}' на родительский каталог и имя.");
         return (parent, leaf);
+    }
+
+    private string ResolveRealPath(string pgDataPath)
+    {
+        // We resolve only the PGDATA leaf itself. If a parent directory is a symlink, the OS follows it
+        // transparently during rename(2)/MoveFile, so no separate handling is needed for parent links.
+        var fullPath = Path.GetFullPath(pgDataPath);
+        try
+        {
+            var info = new DirectoryInfo(fullPath);
+            var target = info.ResolveLinkTarget(returnFinalTarget: true);
+            return target?.FullName is { Length: > 0 } realPath ? realPath : fullPath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to resolve symlinks for PGDATA '{PgDataPath}'. Falling back to original path; " +
+                "if PGDATA is a symlink to another mount, restore may place data on the wrong volume — " +
+                "explicitly point PGDATA at the real path or fix permissions/link integrity to silence this warning.",
+                fullPath);
+            return fullPath;
+        }
+    }
+
+    private void EnsureSameFsRename(string parent, string realPgDataPath)
+    {
+        var probeFromParent = Path.Combine(parent, $"backupster-rename-probe-{Guid.NewGuid():N}");
+        var probeToParent = Path.Combine(parent, $"backupster-rename-probe-{Guid.NewGuid():N}");
+        var probeInside = Path.Combine(realPgDataPath, $"backupster-rename-probe-{Guid.NewGuid():N}");
+        var probeOutside = Path.Combine(parent, $"backupster-rename-probe-{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.CreateDirectory(probeFromParent);
+            Directory.Move(probeFromParent, probeToParent);
+
+            Directory.CreateDirectory(probeInside);
+            Directory.Move(probeInside, probeOutside);
+        }
+        catch (Exception ex)
+        {
+            TryDeleteDirectory(probeFromParent);
+            TryDeleteDirectory(probeToParent);
+            TryDeleteDirectory(probeInside);
+            TryDeleteDirectory(probeOutside);
+            throw new InvalidOperationException(
+                $"Не удалось выполнить атомарный rename для PGDATA '{realPgDataPath}'. " +
+                $"Physical restore требует, чтобы PGDATA и её родительский каталог '{parent}' поддерживали атомарный rename внутри одной FS. " +
+                "Не подходят: PGDATA — отдельная точка монтирования Linux (например, '/mnt/db' смонтирован как сама PGDATA); " +
+                "Windows volume mount point; cross-FS симлинк, который не удалось разрешить (см. предыдущий warning о ResolveLinkTarget). " +
+                $"Подробности: {ex.Message}", ex);
+        }
+        finally
+        {
+            TryDeleteDirectory(probeToParent);
+            TryDeleteDirectory(probeOutside);
+        }
+    }
+
+    private static void WriteMarkerFile(string dir)
+    {
+        var path = Path.Combine(dir, MarkerFileName);
+        File.WriteAllText(path, DateTime.UtcNow.ToString("o"));
+    }
+
+    private void CleanupOrphanStagingDirs(string parent, string leaf)
+    {
+        string[] suffixes = ["new", "failed"];
+        var threshold = DateTime.UtcNow - TimeSpan.FromHours(OrphanGraceHours);
+
+        foreach (var suffix in suffixes)
+        {
+            IEnumerable<string> matches;
+            try
+            {
+                matches = Directory.EnumerateDirectories(parent, $"{leaf}.{suffix}-*");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Orphan cleanup: failed to enumerate '{Parent}' for pattern '{Leaf}.{Suffix}-*'",
+                    parent, leaf, suffix);
+                continue;
+            }
+
+            foreach (var dir in matches)
+            {
+                try
+                {
+                    var marker = Path.Combine(dir, MarkerFileName);
+                    if (!File.Exists(marker))
+                    {
+                        _logger.LogDebug(
+                            "Orphan cleanup: '{Dir}' has no '{Marker}' marker, leaving alone",
+                            dir, MarkerFileName);
+                        continue;
+                    }
+
+                    DateTime createdAt;
+                    try
+                    {
+                        var content = File.ReadAllText(marker).Trim();
+                        if (!DateTime.TryParse(content, null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out createdAt))
+                        {
+                            _logger.LogDebug(
+                                "Orphan cleanup: '{Dir}' marker has unparseable timestamp '{Content}', leaving alone",
+                                dir, content);
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex,
+                            "Orphan cleanup: '{Dir}' marker unreadable, leaving alone", dir);
+                        continue;
+                    }
+
+                    if (createdAt > threshold)
+                    {
+                        _logger.LogDebug(
+                            "Orphan cleanup: '{Dir}' marker created {CreatedAt:o}, younger than {Hours}h, leaving alone",
+                            dir, createdAt, OrphanGraceHours);
+                        continue;
+                    }
+
+                    _logger.LogWarning(
+                        "Orphan cleanup: deleting stale staging dir '{Dir}' (marker created {CreatedAt:o}, age > {Hours}h)",
+                        dir, createdAt, OrphanGraceHours);
+                    Directory.Delete(dir, recursive: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Orphan cleanup: failed to process '{Dir}'", dir);
+                }
+            }
+        }
     }
 
     private async Task VerifyStagedClusterAsync(string stagingPath, string pgCtl, CancellationToken ct)
