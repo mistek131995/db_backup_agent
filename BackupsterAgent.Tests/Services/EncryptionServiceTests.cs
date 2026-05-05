@@ -16,6 +16,9 @@ public sealed class EncryptionServiceTests
     private const int TagSize = EncryptionService.TagSize;
     private const int FrameChunkSize = EncryptionService.FrameChunkSize;
     private const int HeaderSize = EncryptionService.HeaderSize;
+    private const int FlagSize = EncryptionService.FlagSize;
+    private const byte FlagFrameNonFinal = EncryptionService.FlagFrameNonFinal;
+    private const byte FlagFrameFinal = EncryptionService.FlagFrameFinal;
 
     private byte[] _key = null!;
     private EncryptionService _service = null!;
@@ -167,7 +170,7 @@ public sealed class EncryptionServiceTests
                     Assert.That(bytes[0], Is.EqualTo((byte)0x42));
                     Assert.That(bytes[1], Is.EqualTo((byte)0x4B));
                     Assert.That(bytes[2], Is.EqualTo((byte)0x30));
-                    Assert.That(bytes[3], Is.EqualTo((byte)0x32));
+                    Assert.That(bytes[3], Is.EqualTo((byte)0x33));
                     Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4, 4)), Is.EqualTo((uint)FrameChunkSize));
                 });
             }
@@ -409,8 +412,192 @@ public sealed class EncryptionServiceTests
         finally { SafeDelete(inputPath); }
     }
 
+    [TestCase(0)] // truncate right after header (no frames at all)
+    [TestCase(1)] // truncate after 1st non-final full frame
+    [TestCase(2)] // truncate after 2nd non-final full frame
+    [TestCase(3)] // truncate after 3rd (last) non-final full frame, before the final partial frame
+    public async Task DecryptAsync_TruncatedAtFrameBoundary_Throws(int truncateAfterFullFrames)
+    {
+        // 3 full non-final frames + 1 partial final frame.
+        var plaintext = RandomNumberGenerator.GetBytes(FrameChunkSize * 3 + 1234);
+        var inputPath = TempFile();
+        await File.WriteAllBytesAsync(inputPath, plaintext);
+
+        try
+        {
+            var encPath = await _service.EncryptAsync(inputPath, CancellationToken.None);
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(encPath);
+                var fullFrameOnDisk = NonceSize + FlagSize + FrameChunkSize + TagSize;
+                var truncateAt = HeaderSize + truncateAfterFullFrames * fullFrameOnDisk;
+                await File.WriteAllBytesAsync(encPath, bytes.AsSpan(0, truncateAt).ToArray());
+
+                var outputPath = TempFile();
+                try
+                {
+                    var ex = Assert.ThrowsAsync<InvalidDataException>(
+                        () => _service.DecryptAsync(encPath, outputPath, CancellationToken.None));
+                    Assert.That(ex!.Message, Does.Contain("final frame"));
+                }
+                finally { SafeDelete(outputPath); }
+            }
+            finally { SafeDelete(encPath); }
+        }
+        finally { SafeDelete(inputPath); }
+    }
+
     [Test]
-    public async Task DecryptAsync_NonStandardChunkSize_ReadsSizeFromHeader()
+    public async Task DecryptAsync_TamperedFlag_FailsAuthentication()
+    {
+        var plaintext = RandomNumberGenerator.GetBytes(50_000);
+        var inputPath = TempFile();
+        await File.WriteAllBytesAsync(inputPath, plaintext);
+
+        try
+        {
+            var encPath = await _service.EncryptAsync(inputPath, CancellationToken.None);
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(encPath);
+                // Flip the flag byte (right after the first frame's nonce).
+                bytes[HeaderSize + NonceSize] ^= 0xFF;
+                await File.WriteAllBytesAsync(encPath, bytes);
+
+                var outputPath = TempFile();
+                try
+                {
+                    Assert.ThrowsAsync<AuthenticationTagMismatchException>(
+                        () => _service.DecryptAsync(encPath, outputPath, CancellationToken.None));
+                }
+                finally { SafeDelete(outputPath); }
+            }
+            finally { SafeDelete(encPath); }
+        }
+        finally { SafeDelete(inputPath); }
+    }
+
+    [Test]
+    public async Task DecryptAsync_TrailingBytesAfterFullFinalFrame_Throws()
+    {
+        // Last frame is exact FrameChunkSize → ReadFullAsync stops at frame boundary,
+        // probe-byte check after the loop catches the appended garbage as InvalidDataException.
+        var plaintext = RandomNumberGenerator.GetBytes(FrameChunkSize);
+        var inputPath = TempFile();
+        await File.WriteAllBytesAsync(inputPath, plaintext);
+
+        try
+        {
+            var encPath = await _service.EncryptAsync(inputPath, CancellationToken.None);
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(encPath);
+                var withTrail = new byte[bytes.Length + 1];
+                bytes.CopyTo(withTrail, 0);
+                withTrail[^1] = 0xAB;
+                await File.WriteAllBytesAsync(encPath, withTrail);
+
+                var outputPath = TempFile();
+                try
+                {
+                    Assert.ThrowsAsync<InvalidDataException>(
+                        () => _service.DecryptAsync(encPath, outputPath, CancellationToken.None));
+                }
+                finally { SafeDelete(outputPath); }
+            }
+            finally { SafeDelete(encPath); }
+        }
+        finally { SafeDelete(inputPath); }
+    }
+
+    [Test]
+    public async Task DecryptAsync_TrailingBytesAfterPartialFinalFrame_Throws()
+    {
+        // Last frame is partial. The exact exception type depends on parser internals
+        // (current behavior: trailing byte absorbed into ctTagBuffer → tag mismatch).
+        // Contract under test is "file is rejected", not "rejected with this specific exception".
+        var plaintext = RandomNumberGenerator.GetBytes(1234);
+        var inputPath = TempFile();
+        await File.WriteAllBytesAsync(inputPath, plaintext);
+
+        try
+        {
+            var encPath = await _service.EncryptAsync(inputPath, CancellationToken.None);
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(encPath);
+                var withTrail = new byte[bytes.Length + 1];
+                bytes.CopyTo(withTrail, 0);
+                withTrail[^1] = 0xAB;
+                await File.WriteAllBytesAsync(encPath, withTrail);
+
+                var outputPath = TempFile();
+                try
+                {
+                    Assert.That(
+                        async () => await _service.DecryptAsync(encPath, outputPath, CancellationToken.None),
+                        Throws.InstanceOf<InvalidDataException>()
+                            .Or.InstanceOf<AuthenticationTagMismatchException>());
+                }
+                finally { SafeDelete(outputPath); }
+            }
+            finally { SafeDelete(encPath); }
+        }
+        finally { SafeDelete(inputPath); }
+    }
+
+    [Test]
+    public async Task DecryptAsync_LegacyV2_StillReadable()
+    {
+        // Construct a V2 (BK02) file the way old agents wrote it: AAD = 4 bytes (frameIndex BE), no flag byte.
+        const int chunkSize = 4096;
+        var plaintext = RandomNumberGenerator.GetBytes(chunkSize * 2 + 500);
+
+        var inputPath = TempFile();
+        await using (var fs = File.Create(inputPath))
+        {
+            var header = new byte[HeaderSize];
+            EncryptionService.FileMagicV2.CopyTo(header);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(4), (uint)chunkSize);
+            await fs.WriteAsync(header);
+
+            using var gcm = new AesGcm(_key, TagSize);
+            var pos = 0;
+            uint frameIndex = 0;
+            var aad = new byte[4];
+            while (pos < plaintext.Length)
+            {
+                var chunk = Math.Min(chunkSize, plaintext.Length - pos);
+                var nonce = new byte[NonceSize];
+                var ct = new byte[chunk];
+                var tag = new byte[TagSize];
+                RandomNumberGenerator.Fill(nonce);
+                BinaryPrimitives.WriteUInt32BigEndian(aad, frameIndex);
+                gcm.Encrypt(nonce, plaintext.AsSpan(pos, chunk), ct, tag, aad);
+                await fs.WriteAsync(nonce);
+                await fs.WriteAsync(ct);
+                await fs.WriteAsync(tag);
+                pos += chunk;
+                frameIndex++;
+            }
+        }
+
+        try
+        {
+            var outputPath = TempFile();
+            try
+            {
+                await _service.DecryptAsync(inputPath, outputPath, CancellationToken.None);
+                var decrypted = await File.ReadAllBytesAsync(outputPath);
+                Assert.That(decrypted, Is.EqualTo(plaintext));
+            }
+            finally { SafeDelete(outputPath); }
+        }
+        finally { SafeDelete(inputPath); }
+    }
+
+    [Test]
+    public async Task DecryptAsync_LegacyV2_NonStandardChunkSize_ReadsSizeFromHeader()
     {
         const int customChunkSize = 4096;
         var plaintext = RandomNumberGenerator.GetBytes(customChunkSize * 2 + 500);
@@ -419,7 +606,7 @@ public sealed class EncryptionServiceTests
         await using (var fs = File.Create(inputPath))
         {
             var header = new byte[HeaderSize];
-            EncryptionService.FileMagic.CopyTo(header);
+            EncryptionService.FileMagicV2.CopyTo(header);
             BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(4), (uint)customChunkSize);
             await fs.WriteAsync(header);
 
@@ -464,7 +651,7 @@ public sealed class EncryptionServiceTests
         var inputPath = TempFile();
         var outputPath = TempFile();
         var header = new byte[HeaderSize];
-        EncryptionService.FileMagic.CopyTo(header);
+        EncryptionService.FileMagicV2.CopyTo(header);
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(4), uint.MaxValue);
         await File.WriteAllBytesAsync(inputPath, header);
 
@@ -562,36 +749,48 @@ public sealed class EncryptionServiceTests
 
         if (bytes.Length < HeaderSize)
             throw new InvalidDataException("encrypted file too short");
-        if (bytes[0] != 0x42 || bytes[1] != 0x4B || bytes[2] != 0x30 || bytes[3] != 0x32)
-            throw new InvalidDataException("bad magic");
+        if (bytes[0] != 0x42 || bytes[1] != 0x4B || bytes[2] != 0x30 || bytes[3] != 0x33)
+            throw new InvalidDataException("bad magic (expected BK03)");
 
         var chunkSize = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4, 4));
-        var fullFrameSize = NonceSize + chunkSize + TagSize;
+        var fullFrameSize = NonceSize + FlagSize + chunkSize + TagSize;
 
         using var gcm = new AesGcm(key, TagSize);
         using var output = new MemoryStream();
         var offset = HeaderSize;
         uint frameIndex = 0;
-        var aad = new byte[4];
+        var aad = new byte[5];
+        var seenFinal = false;
 
         while (offset < bytes.Length)
         {
             var remaining = bytes.Length - offset;
-            var ctSize = remaining >= fullFrameSize ? chunkSize : remaining - NonceSize - TagSize;
+            var ctSize = remaining >= fullFrameSize ? chunkSize : remaining - NonceSize - FlagSize - TagSize;
             if (ctSize < 0)
                 throw new InvalidDataException("truncated frame");
 
             var nonce = bytes.AsSpan(offset, NonceSize);
-            var ct = bytes.AsSpan(offset + NonceSize, ctSize);
-            var tag = bytes.AsSpan(offset + NonceSize + ctSize, TagSize);
+            var flag = bytes[offset + NonceSize];
+            if (flag != FlagFrameNonFinal && flag != FlagFrameFinal)
+                throw new InvalidDataException($"invalid flag value: 0x{flag:X2} (expected 0x00 or 0x01)");
+            var ct = bytes.AsSpan(offset + NonceSize + FlagSize, ctSize);
+            var tag = bytes.AsSpan(offset + NonceSize + FlagSize + ctSize, TagSize);
             var plaintext = new byte[ctSize];
-            BinaryPrimitives.WriteUInt32BigEndian(aad, frameIndex);
+            BinaryPrimitives.WriteUInt32BigEndian(aad.AsSpan(0, 4), frameIndex);
+            aad[4] = flag;
             gcm.Decrypt(nonce, ct, tag, plaintext, aad);
             output.Write(plaintext);
 
-            offset += NonceSize + ctSize + TagSize;
+            offset += NonceSize + FlagSize + ctSize + TagSize;
             frameIndex++;
+
+            if (flag == FlagFrameFinal) { seenFinal = true; break; }
         }
+
+        if (!seenFinal)
+            throw new InvalidDataException("truncated: no final frame marker");
+        if (offset != bytes.Length)
+            throw new InvalidDataException("trailing bytes after final frame");
 
         return output.ToArray();
     }
