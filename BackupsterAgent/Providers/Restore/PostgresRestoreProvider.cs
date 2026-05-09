@@ -102,6 +102,7 @@ FROM pg_roles WHERE rolname = current_user;";
                 "-U", connection.Username,
                 "-d", targetDatabase,
                 "-v", "ON_ERROR_STOP=1",
+                "--single-transaction",
                 "-f", restoreFilePath,
             },
             EnvironmentOverrides = new Dictionary<string, string?>
