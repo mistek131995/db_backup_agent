@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Xml.Linq;
 using BackupsterAgent.Configuration;
 
 namespace BackupsterAgent.Providers.Upload;
@@ -88,11 +91,45 @@ public sealed class WebDavUploadProvider : IUploadProvider, IDisposable
         return storagePath;
     }
 
-    public Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("Byte-array upload is not supported for WebDAV provider. File backup with deduplication is S3/AzureBlob-only.");
+    public async Task UploadBytesAsync(byte[] content, string objectKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
 
-    public Task<bool> ExistsAsync(string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("ExistsAsync is not supported for WebDAV provider. File backup with deduplication is S3/AzureBlob-only.");
+        var remotePath = JoinPath(_basePath, objectKey);
+        var remoteDir = GetParentPath(remotePath);
+
+        if (!string.IsNullOrEmpty(remoteDir) && remoteDir != "/")
+            await EnsureRemoteDirectoryAsync(remoteDir, ct);
+
+        using var byteContent = new ByteArrayContent(content);
+        byteContent.Headers.ContentLength = content.LongLength;
+        byteContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, BuildUri(remotePath))
+        {
+            Content = byteContent,
+        };
+
+        using var response = await SendAsync(request, HttpCompletionOption.ResponseContentRead, ct);
+        await EnsureSuccessAsync(response, "PUT", remotePath, ct);
+    }
+
+    public async Task<bool> ExistsAsync(string objectKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+
+        var remotePath = JoinPath(_basePath, objectKey);
+
+        using var request = new HttpRequestMessage(HttpMethod.Head, BuildUri(remotePath));
+        using var response = await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return false;
+
+        await EnsureSuccessAsync(response, "HEAD", remotePath, ct);
+        return true;
+    }
 
     public async Task<long> GetObjectSizeAsync(string objectKey, CancellationToken ct)
     {
@@ -160,11 +197,121 @@ public sealed class WebDavUploadProvider : IUploadProvider, IDisposable
         _logger.LogInformation("WebDAV download completed: '{LocalPath}'", localPath);
     }
 
-    public Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct) =>
-        throw new NotSupportedException("DownloadBytesAsync is not supported for WebDAV provider. File backup and chunk operations are S3/AzureBlob-only.");
+    public async Task<byte[]> DownloadBytesAsync(string objectKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
 
-    public IAsyncEnumerable<StorageObject> ListAsync(string prefix, CancellationToken ct) =>
-        throw new NotSupportedException("ListAsync is not supported for WebDAV provider. Chunk GC is S3/AzureBlob-only.");
+        var remotePath = JoinPath(_basePath, objectKey);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(remotePath));
+        using var response = await SendAsync(request, HttpCompletionOption.ResponseContentRead, ct);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            throw new FileNotFoundException(
+                $"WebDAV-файл '{remotePath}' не найден на хосте {_baseUri.Host}.", remotePath);
+
+        await EnsureSuccessAsync(response, "GET", remotePath, ct);
+        return await response.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    public async IAsyncEnumerable<StorageObject> ListAsync(
+        string prefix,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var baseTrimmed = _basePath.TrimEnd('/');
+        var startDir = string.IsNullOrEmpty(prefix)
+            ? (_basePath.Length == 0 ? "/" : _basePath)
+            : JoinPath(_basePath, prefix);
+
+        XNamespace dav = "DAV:";
+        var queue = new Queue<string>();
+        queue.Enqueue(startDir);
+
+        while (queue.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var dir = queue.Dequeue();
+
+            var xml = await PropfindDirectoryAsync(dir, ct);
+            if (xml is null || xml.Root is null) continue;
+
+            var dirTrimmed = dir.TrimEnd('/');
+
+            foreach (var responseEl in xml.Root.Elements(dav + "response"))
+            {
+                var hrefRaw = responseEl.Element(dav + "href")?.Value;
+                if (string.IsNullOrEmpty(hrefRaw)) continue;
+
+                var decodedPath = NormalizeHref(hrefRaw).TrimEnd('/');
+
+                if (string.Equals(decodedPath, dirTrimmed, StringComparison.Ordinal))
+                    continue;
+
+                var prop = responseEl.Elements(dav + "propstat")
+                    .FirstOrDefault(p => (p.Element(dav + "status")?.Value ?? string.Empty).Contains(" 200 "))
+                    ?.Element(dav + "prop");
+
+                var resourceType = prop?.Element(dav + "resourcetype");
+                var isCollection = resourceType?.Element(dav + "collection") is not null;
+
+                if (isCollection)
+                {
+                    queue.Enqueue(decodedPath);
+                    continue;
+                }
+
+                var lenRaw = prop?.Element(dav + "getcontentlength")?.Value;
+                if (string.IsNullOrEmpty(lenRaw)) continue;
+                if (!long.TryParse(lenRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var size))
+                    continue;
+
+                var lastModRaw = prop?.Element(dav + "getlastmodified")?.Value;
+                var lastWriteUtc = ParseRfc1123Utc(lastModRaw);
+
+                var key = decodedPath.StartsWith(baseTrimmed, StringComparison.Ordinal)
+                    ? decodedPath[baseTrimmed.Length..].TrimStart('/')
+                    : decodedPath.TrimStart('/');
+
+                yield return new StorageObject(key, lastWriteUtc, size);
+            }
+        }
+    }
+
+    private async Task<XDocument?> PropfindDirectoryAsync(string dir, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod("PROPFIND"), BuildUri(dir));
+        request.Headers.TryAddWithoutValidation("Depth", "1");
+
+        using var response = await SendAsync(request, HttpCompletionOption.ResponseContentRead, ct);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+
+        await EnsureSuccessAsync(response, "PROPFIND", dir, ct);
+
+        var xmlText = await response.Content.ReadAsStringAsync(ct);
+        return XDocument.Parse(xmlText);
+    }
+
+    private string NormalizeHref(string href)
+    {
+        var abs = new Uri(_baseUri, href);
+        return Uri.UnescapeDataString(abs.AbsolutePath);
+    }
+
+    private static DateTime ParseRfc1123Utc(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return DateTime.UtcNow;
+
+        if (DateTime.TryParseExact(
+                raw, "r", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var parsed))
+            return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+
+        return DateTime.UtcNow;
+    }
 
     public async Task DeleteAsync(string objectKey, CancellationToken ct)
     {
@@ -295,6 +442,12 @@ public sealed class WebDavUploadProvider : IUploadProvider, IDisposable
             .Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Select(Uri.EscapeDataString));
         return new Uri(_baseUri, "/" + encoded);
+    }
+
+    private static string GetParentPath(string path)
+    {
+        var idx = path.LastIndexOf('/');
+        return idx <= 0 ? string.Empty : path[..idx];
     }
 
     private static string JoinPath(string left, string right)

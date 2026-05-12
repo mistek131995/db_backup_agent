@@ -6,11 +6,12 @@ using BackupsterAgent.Services.Common.Resolvers;
 
 namespace BackupsterAgent.Providers.Upload;
 
-public sealed class UploadProviderFactory : IUploadProviderFactory
+public sealed class UploadProviderFactory : IUploadProviderFactory, IAsyncDisposable
 {
     private readonly StorageResolver _storages;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ConcurrentDictionary<string, IUploadProvider> _cache = new(StringComparer.Ordinal);
+    private bool _disposed;
 
     public UploadProviderFactory(StorageResolver storages, ILoggerFactory loggerFactory)
     {
@@ -21,6 +22,7 @@ public sealed class UploadProviderFactory : IUploadProviderFactory
     public IUploadProvider GetProvider(string storageName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storageName);
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
         return _cache.GetOrAdd(storageName, Create);
     }
@@ -54,5 +56,28 @@ public sealed class UploadProviderFactory : IUploadProviderFactory
             _ => throw new InvalidOperationException(
                 $"Storage '{storageName}' has unknown provider: {storage.Provider}"),
         };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        foreach (var provider in _cache.Values)
+        {
+            switch (provider)
+            {
+                case IAsyncDisposable asyncDisposable:
+                    try { await asyncDisposable.DisposeAsync(); }
+                    catch { /* swallow — best-effort shutdown */ }
+                    break;
+                case IDisposable disposable:
+                    try { disposable.Dispose(); }
+                    catch { /* swallow — best-effort shutdown */ }
+                    break;
+            }
+        }
+
+        _cache.Clear();
     }
 }

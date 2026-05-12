@@ -35,23 +35,6 @@ public sealed class FileSetBackupPipeline
         CancellationToken ct)
     {
         var startedAt = exec.StartedAt;
-        var storage = _storages.Resolve(config.StorageName);
-
-        if (storage.Provider is UploadProvider.Sftp or UploadProvider.WebDav)
-        {
-            var providerLabel = storage.Provider == UploadProvider.Sftp ? "SFTP" : "WebDAV";
-            var englishError = $"File backup is not supported on {providerLabel} storage. Configure an S3, Azure Blob or LocalFs storage for this file set.";
-            _logger.LogWarning(
-                "FileSetBackupPipeline: {Provider} storage '{Storage}' is not supported for file sets. FileSet '{Name}' skipped.",
-                providerLabel, storage.Name, config.Name);
-            return new PipelineOutcome
-            {
-                Success = false,
-                ErrorMessage = englishError,
-                FileBackupError = $"Бэкап файлов не поддерживается на {providerLabel}-хранилище. Настройте S3-, Azure Blob- или LocalFs-хранилище для этого набора файлов.",
-            };
-        }
-
         var uploader = _uploadFactory.GetProvider(config.StorageName);
         var backupFolder = $"{config.Name}/{startedAt:yyyy-MM-dd_HH-mm-ss}";
 

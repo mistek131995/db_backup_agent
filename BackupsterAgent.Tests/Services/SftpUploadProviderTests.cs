@@ -51,45 +51,6 @@ public sealed class SftpUploadProviderTests
             Throws.InstanceOf<ArgumentException>());
     }
 
-    [Test]
-    public void DownloadBytesAsync_Throws_WithMessageMentioningS3()
-    {
-        var provider = NewProvider();
-        var ex = Assert.ThrowsAsync<NotSupportedException>(() =>
-            provider.DownloadBytesAsync("k", CancellationToken.None));
-        Assert.That(ex!.Message, Does.Contain("S3-only"));
-    }
-
-    [Test]
-    public void ExistsAsync_Throws()
-    {
-        var provider = NewProvider();
-        Assert.ThrowsAsync<NotSupportedException>(() =>
-            provider.ExistsAsync("k", CancellationToken.None));
-    }
-
-    [Test]
-    public void UploadBytesAsync_Throws()
-    {
-        var provider = NewProvider();
-        Assert.ThrowsAsync<NotSupportedException>(() =>
-            provider.UploadBytesAsync([1, 2, 3], "k", CancellationToken.None));
-    }
-
-    [Test]
-    public void ListAsync_Throws()
-    {
-        var provider = NewProvider();
-        Assert.That(
-            async () =>
-            {
-                await foreach (var _ in provider.ListAsync("prefix", CancellationToken.None))
-                {
-                }
-            },
-            Throws.InstanceOf<NotSupportedException>());
-    }
-
     private static SftpUploadProvider NewProvider() =>
         new(new SftpSettings { Host = "sftp.example", RemotePath = "/backups" },
             NullLogger<SftpUploadProvider>.Instance);

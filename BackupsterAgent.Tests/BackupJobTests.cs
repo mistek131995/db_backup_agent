@@ -55,28 +55,6 @@ public sealed class BackupJobTests
     }
 
     [Test]
-    public async Task CaptureFilesSafelyAsync_SftpStorage_ReturnsUserFacingError()
-    {
-        await File.WriteAllBytesAsync(Path.Combine(_tempRoot, "a.bin"), new byte[] { 1, 2, 3 });
-
-        var pipeline = BuildPipeline();
-        var storage = StorageFor(UploadProvider.Sftp);
-        var config = new DatabaseConfig { Database = "db1", FilePaths = [_tempRoot] };
-
-        var (metrics, error) = await pipeline.CaptureFilesSafelyAsync(
-            config, storage, _uploader, backupFolder: "db1/2026-04-17_00-00-00", dumpObjectKey: "db1/.../dump.enc",
-            TestHelpers.NullReporter<BackupStage>(), CancellationToken.None);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(metrics, Is.Null);
-            Assert.That(error, Is.EqualTo(
-                "Бэкап файлов не поддерживается на SFTP-хранилище 'sftp-storage'. Файлы не загружены."));
-            Assert.That(_uploader.UploadCalls, Is.Zero, "SFTP branch must short-circuit before touching the uploader");
-        });
-    }
-
-    [Test]
     public async Task CaptureFilesSafelyAsync_Success_ReturnsMetricsAndNullError()
     {
         var content = RandomNumberGenerator.GetBytes(1024);

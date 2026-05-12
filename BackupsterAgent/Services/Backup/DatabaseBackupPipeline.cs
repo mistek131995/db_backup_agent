@@ -127,16 +127,6 @@ public sealed class DatabaseBackupPipeline
         if (config.FilePaths.Count == 0)
             return (null, null);
 
-        if (storage.Provider is UploadProvider.Sftp or UploadProvider.WebDav)
-        {
-            var providerLabel = storage.Provider == UploadProvider.Sftp ? "SFTP" : "WebDAV";
-            _logger.LogWarning(
-                "File backup is not supported on {Provider} storage '{Storage}'. " +
-                "Skipping {Count} file path(s) for database '{Database}'",
-                providerLabel, storage.Name, config.FilePaths.Count, config.Database);
-            return (null, $"Бэкап файлов не поддерживается на {providerLabel}-хранилище '{storage.Name}'. Файлы не загружены.");
-        }
-
         try
         {
             _logger.LogInformation(
