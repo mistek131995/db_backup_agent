@@ -40,16 +40,16 @@ public sealed class SftpUploadProvider : IUploadProvider, IAsyncDisposable
         {
             EnsureRemoteDirectory(client, remoteDir, token);
 
-            using var fileStream = new FileStream(
-                filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 65536);
-
             Action<ulong>? callback = progress is null
                 ? null
                 : uploaded => progress.Report((long)uploaded);
 
             return Task.Run(() =>
             {
+                using var fileStream = new FileStream(
+                    filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 65536);
+
                 using var reg = token.Register(() =>
                 {
                     try { client.Disconnect(); }

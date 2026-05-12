@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BackupsterAgent", "Backupst
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BackupsterAgent.Tests", "BackupsterAgent.Tests\BackupsterAgent.Tests.csproj", "{643D2334-4C5F-4BC1-8920-7EB6D3F39FD3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BackupsterAgent.IntegrationTests", "BackupsterAgent.IntegrationTests\BackupsterAgent.IntegrationTests.csproj", "{C24C0E94-3EE6-4420-8590-44CF07825942}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{643D2334-4C5F-4BC1-8920-7EB6D3F39FD3}.Release|x64.Build.0 = Release|Any CPU
 		{643D2334-4C5F-4BC1-8920-7EB6D3F39FD3}.Release|x86.ActiveCfg = Release|Any CPU
 		{643D2334-4C5F-4BC1-8920-7EB6D3F39FD3}.Release|x86.Build.0 = Release|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Debug|x64.Build.0 = Debug|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Debug|x86.Build.0 = Debug|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Release|x64.ActiveCfg = Release|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Release|x64.Build.0 = Release|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Release|x86.ActiveCfg = Release|Any CPU
+		{C24C0E94-3EE6-4420-8590-44CF07825942}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
