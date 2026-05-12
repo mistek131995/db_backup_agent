@@ -20,6 +20,16 @@ X-Agent-Token: <AgentSettings.Token>
 
 Токен задаётся через env var `AgentSettings__Token` (см. README агента). В теле запроса и в query-строке токен не передаётся никогда. В логах агента печатается только префикс `token[..8]`.
 
+### Версия агента
+
+Каждый запрос к дашборду дополнительно содержит заголовок:
+
+```
+X-Agent-Version: <agent semver, например 1.2.3 или 1.2.3e>
+```
+
+Значение читается из `AssemblyInformationalVersionAttribute` ассембли агента (см. `Configuration/AgentVersion`). Header выставляется централизованно через `DefaultRequestHeaders` всех типизированных `HttpClient`'ов в `Program.cs` (`ConfigureDashboardClient`) — все 7 агентских клиентов отправляют его автоматически. Никакая идентификация по этому заголовку не проводится; он используется только для отображения в UI и проверки доступности новой версии.
+
 ### Формат enum по сети
 
 Все enum сериализуются в **camelCase** (`JsonStringEnumConverter(JsonNamingPolicy.CamelCase)`). Примеры: `inProgress`, `encryptingDump`, `downloadingDump`, `success`, `failed`, `partial`.

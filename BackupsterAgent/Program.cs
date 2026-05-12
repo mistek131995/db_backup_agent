@@ -117,23 +117,30 @@ builder.Services.AddSingleton<FileBackupService>();
 builder.Services.AddSingleton<ManifestStore>();
 builder.Services.AddSingleton<IUploadProviderFactory, UploadProviderFactory>();
 builder.Services.AddSingleton<IDashboardAuthGuard, DashboardAuthGuard>();
+
+void ConfigureDashboardClient(HttpClient c, int timeoutSeconds)
+{
+    c.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+    c.DefaultRequestHeaders.Add("X-Agent-Version", AgentVersion.Current);
+}
+
 builder.Services.AddHttpClient<IBackupRecordClient, BackupRecordClient>(
-    c => c.Timeout = TimeSpan.FromSeconds(20));
+    c => ConfigureDashboardClient(c, 20));
 var scheduleCachePath = Path.Combine(configDir, "schedule.json");
 builder.Services.AddSingleton(sp =>
     new ScheduleStore(scheduleCachePath, sp.GetRequiredService<ILogger<ScheduleStore>>()));
 builder.Services.AddHttpClient<ScheduleService>(
-    c => c.Timeout = TimeSpan.FromSeconds(20));
+    c => ConfigureDashboardClient(c, 20));
 builder.Services.AddHttpClient<IConnectionSyncService, ConnectionSyncService>(
-    c => c.Timeout = TimeSpan.FromSeconds(20));
+    c => ConfigureDashboardClient(c, 20));
 builder.Services.AddHttpClient<IFileSetSyncService, FileSetSyncService>(
-    c => c.Timeout = TimeSpan.FromSeconds(20));
+    c => ConfigureDashboardClient(c, 20));
 builder.Services.AddHttpClient<IDatabaseSyncService, DatabaseSyncService>(
-    c => c.Timeout = TimeSpan.FromSeconds(20));
+    c => ConfigureDashboardClient(c, 20));
 builder.Services.AddHttpClient<IAgentTaskClient, AgentTaskClient>(
-    c => c.Timeout = TimeSpan.FromSeconds(60));
+    c => ConfigureDashboardClient(c, 60));
 builder.Services.AddHttpClient<IRetentionClient, RetentionClient>(
-    c => c.Timeout = TimeSpan.FromSeconds(20));
+    c => ConfigureDashboardClient(c, 20));
 builder.Services.AddSingleton<IProgressReporterFactory, ProgressReporterFactory>();
 builder.Services.AddSingleton<DatabaseRestoreService>();
 builder.Services.AddSingleton<FileRestoreService>();
@@ -159,4 +166,8 @@ builder.Services.AddHostedService<RetentionWorker>();
 builder.Services.AddHostedService<OutboxReplayWorker>();
 
 var host = builder.Build();
+
+var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("BackupsterAgent");
+startupLogger.LogInformation("BackupsterAgent {Version} starting", AgentVersion.Current);
+
 host.Run();
