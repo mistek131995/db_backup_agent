@@ -134,13 +134,15 @@ public sealed class SftpBackupIntegrationTests
         }
 
         var expectedFiles = CountSourceFiles();
+        var manifestExists = await _provider.ExistsAsync(manifestKey, _cts.Token);
+        var chunkCount = await CountChunksAsync();
 
-        Assert.Multiple(async () =>
+        Assert.Multiple(() =>
         {
-            Assert.That(await _provider.ExistsAsync(manifestKey, _cts.Token), Is.True);
+            Assert.That(manifestExists, Is.True);
             Assert.That(writerFilesCount, Is.EqualTo(expectedFiles));
             Assert.That(newChunks, Is.GreaterThan(0), "fresh sandbox should upload at least one chunk");
-            Assert.That(await CountChunksAsync(), Is.GreaterThan(0));
+            Assert.That(chunkCount, Is.GreaterThan(0));
         });
     }
 

@@ -1,6 +1,7 @@
 using Amazon.S3;
 using Amazon.S3.Model;
 using BackupsterAgent.Configuration;
+using BackupsterAgent.Enums;
 using BackupsterAgent.Providers.Upload;
 using Microsoft.Extensions.Configuration;
 
@@ -45,6 +46,89 @@ public static class IntegrationConfig
             && settings.Port > 0;
     }
 
+    public static bool TryGetPostgresConnection(out ConnectionConfig connection)
+    {
+        var section = Config.Value.GetSection("Postgres");
+        var host = section["Host"] ?? string.Empty;
+        var portRaw = section["Port"];
+        var username = section["Username"] ?? string.Empty;
+        var password = section["Password"] ?? string.Empty;
+        var binPath = section["BinPath"];
+
+        var port = ParsePortOrDefault(portRaw, defaultPort: 5432, sectionName: "Postgres");
+
+        connection = new ConnectionConfig
+        {
+            Name = "postgres-itest",
+            DatabaseType = DatabaseType.Postgres,
+            Host = host,
+            Port = port,
+            Username = username,
+            Password = password,
+            BinPath = string.IsNullOrWhiteSpace(binPath) ? null : binPath,
+        };
+
+        return !string.IsNullOrWhiteSpace(host)
+            && !string.IsNullOrWhiteSpace(username)
+            && !string.IsNullOrWhiteSpace(password);
+    }
+
+    public static bool TryGetMysqlConnection(out ConnectionConfig connection)
+    {
+        var section = Config.Value.GetSection("Mysql");
+        var host = section["Host"] ?? string.Empty;
+        var portRaw = section["Port"];
+        var username = section["Username"] ?? string.Empty;
+        var password = section["Password"] ?? string.Empty;
+        var binPath = section["BinPath"];
+
+        var port = ParsePortOrDefault(portRaw, defaultPort: 3306, sectionName: "Mysql");
+
+        connection = new ConnectionConfig
+        {
+            Name = "mysql-itest",
+            DatabaseType = DatabaseType.Mysql,
+            Host = host,
+            Port = port,
+            Username = username,
+            Password = password,
+            BinPath = string.IsNullOrWhiteSpace(binPath) ? null : binPath,
+        };
+
+        return !string.IsNullOrWhiteSpace(host)
+            && !string.IsNullOrWhiteSpace(username)
+            && !string.IsNullOrWhiteSpace(password);
+    }
+
+    public static bool TryGetMssqlConnection(out ConnectionConfig connection)
+    {
+        var section = Config.Value.GetSection("Mssql");
+        var host = section["Host"] ?? string.Empty;
+        var portRaw = section["Port"];
+        var username = section["Username"] ?? string.Empty;
+        var password = section["Password"] ?? string.Empty;
+        var sharedPath = section["SharedBackupPath"];
+        var agentPath = section["AgentBackupPath"];
+
+        var port = ParsePortOrDefault(portRaw, defaultPort: 1433, sectionName: "Mssql");
+
+        connection = new ConnectionConfig
+        {
+            Name = "mssql-itest",
+            DatabaseType = DatabaseType.Mssql,
+            Host = host,
+            Port = port,
+            Username = username,
+            Password = password,
+            SharedBackupPath = string.IsNullOrWhiteSpace(sharedPath) ? null : sharedPath,
+            AgentBackupPath = string.IsNullOrWhiteSpace(agentPath) ? null : agentPath,
+        };
+
+        return !string.IsNullOrWhiteSpace(host)
+            && !string.IsNullOrWhiteSpace(username)
+            && !string.IsNullOrWhiteSpace(password);
+    }
+
     public static bool TryGetS3Settings(out S3Settings settings)
     {
         var section = Config.Value.GetSection("S3");
@@ -65,6 +149,17 @@ public static class IntegrationConfig
         return !string.IsNullOrWhiteSpace(endpointUrl)
             && !string.IsNullOrWhiteSpace(accessKey)
             && !string.IsNullOrWhiteSpace(secretKey);
+    }
+
+    private static int ParsePortOrDefault(string? portRaw, int defaultPort, string sectionName)
+    {
+        if (string.IsNullOrWhiteSpace(portRaw)) return defaultPort;
+        if (int.TryParse(portRaw, out var p) && p is > 0 and <= 65535) return p;
+
+        throw new InvalidOperationException(
+            $"Integration config: '{sectionName}:Port' = '{portRaw}' is not a valid TCP port. " +
+            "Fix the value via dotnet user-secrets or BACKUPSTER_INTEGRATION_* env, " +
+            "or remove the key to fall back to the default port.");
     }
 
     public static string MakeBucketName() =>

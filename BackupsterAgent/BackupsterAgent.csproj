@@ -9,6 +9,7 @@
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <Version>0.1.0</Version>
     <InformationalVersion>0.1.0</InformationalVersion>
+    <UserSecretsId>682cede7-c276-4c32-a9ba-2eb01fa9759a</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
