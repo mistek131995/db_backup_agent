@@ -19,8 +19,6 @@ public sealed class ScheduleService : DashboardClientBase
 
     public static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(5);
 
-    private const string DefaultKey = "__default__";
-
     private ScheduleDto? _cachedSchedule;
     private DateTime _lastFetchAt = DateTime.MinValue;
     private readonly Dictionary<string, string> _lastCronByName = new(StringComparer.Ordinal);
@@ -43,32 +41,33 @@ public sealed class ScheduleService : DashboardClientBase
             _logger.LogInformation("ScheduleService: loaded schedule from disk cache.");
     }
 
-    public async Task<DateTime?> GetNextRunAsync(string databaseName, CancellationToken ct)
+    public async Task<IReadOnlyList<ScheduleEntry>> GetDueSchedulesAsync(
+        string scheduleKey, CancellationToken ct)
     {
         if (DateTime.UtcNow - _lastFetchAt >= PollInterval)
             await RefreshScheduleAsync(ct);
 
-        if (_cachedSchedule is null)
-            return null;
+        if (_cachedSchedule?.Overrides is null)
+            return Array.Empty<ScheduleEntry>();
 
-        var match = _cachedSchedule.Overrides?
-            .FirstOrDefault(o => string.Equals(o.DatabaseName, databaseName, StringComparison.Ordinal));
+        var result = new List<ScheduleEntry>(2);
 
-        if (match is not null && match.IsActive)
-            return ParseNextOccurrence(match.CronExpression);
+        foreach (var o in _cachedSchedule.Overrides)
+        {
+            if (!string.Equals(o.DatabaseName, scheduleKey, StringComparison.Ordinal))
+                continue;
 
-        if (!_cachedSchedule.IsActive)
-            return null;
+            if (!o.IsActive)
+                continue;
 
-        return ParseNextOccurrence(_cachedSchedule.CronExpression);
-    }
+            var next = ParseNextOccurrence(o.CronExpression);
+            if (next is null)
+                continue;
 
-    public BackupMode GetBackupMode(string databaseName)
-    {
-        var match = _cachedSchedule?.Overrides?
-            .FirstOrDefault(o => string.Equals(o.DatabaseName, databaseName, StringComparison.Ordinal));
+            result.Add(new ScheduleEntry(o.BackupMode, next.Value));
+        }
 
-        return match?.BackupMode ?? BackupMode.Logical;
+        return result;
     }
 
     private async Task RefreshScheduleAsync(CancellationToken ct)
@@ -113,10 +112,7 @@ public sealed class ScheduleService : DashboardClientBase
 
     private void LogCronChanges(ScheduleDto fetched)
     {
-        var incoming = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [DefaultKey] = fetched.IsActive ? fetched.CronExpression : "(inactive)",
-        };
+        var incoming = new Dictionary<string, string>(StringComparer.Ordinal);
 
         if (fetched.Overrides is not null)
         {
@@ -129,20 +125,18 @@ public sealed class ScheduleService : DashboardClientBase
             var oldCron = _lastCronByName.GetValueOrDefault(name);
             if (oldCron == newCron) continue;
 
-            var label = name == DefaultKey ? "default" : $"override '{name}'";
             _logger.LogInformation(
-                "ScheduleService: cron for {Label} changed. Old: '{OldCron}' → New: '{NewCron}'",
-                label, oldCron ?? "(none)", newCron);
+                "ScheduleService: cron for override '{Name}' changed. Old: '{OldCron}' → New: '{NewCron}'",
+                name, oldCron ?? "(none)", newCron);
         }
 
         foreach (var name in _lastCronByName.Keys.ToList())
         {
             if (incoming.ContainsKey(name)) continue;
 
-            var label = name == DefaultKey ? "default" : $"override '{name}'";
             _logger.LogInformation(
-                "ScheduleService: cron for {Label} removed (was '{OldCron}')",
-                label, _lastCronByName[name]);
+                "ScheduleService: cron for override '{Name}' removed (was '{OldCron}')",
+                name, _lastCronByName[name]);
         }
 
         _lastCronByName.Clear();

@@ -136,26 +136,28 @@ public sealed class FileSetWorker : BackgroundService
                     var scheduleKey = config.Name;
                     var trackerKey = IBackupRunTracker.FileSetKey(config.Name);
 
-                    var nextRun = await _schedule.GetNextRunAsync(scheduleKey, stoppingToken);
+                    var entries = await _schedule.GetDueSchedulesAsync(scheduleKey, stoppingToken);
 
-                    if (nextRun is null)
+                    if (entries.Count == 0)
                     {
                         _logger.LogDebug(
-                            "FileSetWorker: schedule inactive for '{Name}', skipping", config.Name);
+                            "FileSetWorker: no active schedule for '{Name}', skipping", config.Name);
                         continue;
                     }
 
+                    var nextRun = entries.Min(e => e.NextRun);
+
                     var last = _runTracker.GetLastRun(trackerKey);
-                    if (nextRun.Value <= DateTime.UtcNow && (last is null || nextRun.Value > last))
+                    if (nextRun <= DateTime.UtcNow && (last is null || nextRun > last))
                     {
-                        due.Add((config, nextRun.Value));
-                        _runTracker.RecordRun(trackerKey, nextRun.Value);
+                        due.Add((config, nextRun));
+                        _runTracker.RecordRun(trackerKey, nextRun);
                     }
                     else
                     {
                         _logger.LogDebug(
                             "FileSetWorker: '{Name}' next run at {NextRun:u}, nothing to do yet",
-                            config.Name, nextRun.Value);
+                            config.Name, nextRun);
                     }
                 }
 

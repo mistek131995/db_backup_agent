@@ -51,7 +51,7 @@ Dump → Encrypt → Upload → Cleanup → File Backup (S3 / SFTP / Azure Blob 
 
 Отдельный сектор конфига `FileSets[]` — для случаев, когда нужно забэкапить произвольные каталоги без привязки к базе данных (например, загруженные пользователями файлы приложения, конфиги, логи). Каждый file-set: `Name`, `StorageName`, `Paths[]`.
 
-Пайплайн: **Open → Capture → Finalize** — тот же самый механизм content-defined chunking + дедупликация по sha256, что и у файлового этапа БД-бэкапа, но без стадий dump/encrypt/upload дампа. Расписание — общее с БД (дефолтный cron агента), либо override по имени file-set через дашборд.
+Пайплайн: **Open → Capture → Finalize** — тот же самый механизм content-defined chunking + дедупликация по sha256, что и у файлового этапа БД-бэкапа, но без стадий dump/encrypt/upload дампа. Расписание — индивидуальное per-file-set, задаётся через дашборд.
 
 **Работает на всех провайдерах:** S3, SFTP, Azure Blob, WebDAV, LocalFs.
 
