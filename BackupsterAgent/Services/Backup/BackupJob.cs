@@ -16,6 +16,10 @@ public sealed class BackupJob
         _pipeline = pipeline;
     }
 
-    public Task<BackupResult> RunAsync(DatabaseConfig config, BackupMode mode, CancellationToken ct) =>
-        _coordinator.RunAsync(new DatabaseBackupDescriptor(config, mode, _pipeline), ct);
+    public Task<BackupResult> RunAsync(
+        DatabaseConfig config,
+        StorageConfig storage,
+        BackupMode mode,
+        CancellationToken ct) =>
+        _coordinator.RunAsync(new DatabaseBackupDescriptor(config, storage, mode, _pipeline), ct);
 }

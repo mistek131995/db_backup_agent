@@ -127,16 +127,13 @@ public sealed class FileSetWorker : BackgroundService
         {
             try
             {
-                var due = new List<(FileSetConfig Config, DateTime NextRun)>();
+                var due = new List<(FileSetConfig Config, string StorageName, DateTime NextRun)>();
 
                 foreach (var config in _validFileSets)
                 {
                     if (stoppingToken.IsCancellationRequested) break;
 
-                    var scheduleKey = config.Name;
-                    var trackerKey = IBackupRunTracker.FileSetKey(config.Name);
-
-                    var entries = await _schedule.GetDueSchedulesAsync(scheduleKey, stoppingToken);
+                    var entries = await _schedule.GetDueSchedulesAsync(config.Name, stoppingToken);
 
                     if (entries.Count == 0)
                     {
@@ -145,19 +142,25 @@ public sealed class FileSetWorker : BackgroundService
                         continue;
                     }
 
-                    var nextRun = entries.Min(e => e.NextRun);
+                    foreach (var entry in entries)
+                    {
+                        var storageName = !string.IsNullOrWhiteSpace(entry.StorageName)
+                            ? entry.StorageName
+                            : config.StorageName;
 
-                    var last = _runTracker.GetLastRun(trackerKey);
-                    if (nextRun <= DateTime.UtcNow && (last is null || nextRun > last))
-                    {
-                        due.Add((config, nextRun));
-                        _runTracker.RecordRun(trackerKey, nextRun);
-                    }
-                    else
-                    {
-                        _logger.LogDebug(
-                            "FileSetWorker: '{Name}' next run at {NextRun:u}, nothing to do yet",
-                            config.Name, nextRun);
+                        var trackerKey = IBackupRunTracker.FileSetKey(config.Name, storageName);
+                        var last = _runTracker.GetLastRun(trackerKey);
+                        if (entry.NextRun <= DateTime.UtcNow && (last is null || entry.NextRun > last))
+                        {
+                            due.Add((config, storageName, entry.NextRun));
+                            _runTracker.RecordRun(trackerKey, entry.NextRun);
+                        }
+                        else
+                        {
+                            _logger.LogDebug(
+                                "FileSetWorker: '{Name}' ({Storage}) next run at {NextRun:u}, nothing to do yet",
+                                config.Name, storageName, entry.NextRun);
+                        }
                     }
                 }
 
@@ -187,7 +190,7 @@ public sealed class FileSetWorker : BackgroundService
     }
 
     private async Task RunDueAsync(
-        List<(FileSetConfig Config, DateTime NextRun)> due,
+        List<(FileSetConfig Config, string StorageName, DateTime NextRun)> due,
         CancellationToken stoppingToken)
     {
         _logger.LogInformation(
@@ -200,46 +203,56 @@ public sealed class FileSetWorker : BackgroundService
         {
             if (stoppingToken.IsCancellationRequested) break;
 
-            var (config, nextRun) = due[i];
+            var (config, storageName, nextRun) = due[i];
 
             _logger.LogInformation(
                 "[{Index}/{Total}] Starting file set backup. Name: '{Name}', Storage: '{Storage}', NextRun: {NextRun:u}",
-                i + 1, due.Count, config.Name, config.StorageName, nextRun);
+                i + 1, due.Count, config.Name, storageName, nextRun);
+
+            if (!_storages.TryResolve(storageName, out var storage))
+            {
+                failed++;
+                _logger.LogWarning(
+                    "[{Index}/{Total}] Storage '{Storage}' for file set '{Name}' is not configured on this agent. Skipping. Available: {Available}",
+                    i + 1, due.Count, storageName, config.Name,
+                    _storages.Names.Count == 0 ? "(none)" : string.Join(", ", _storages.Names));
+                continue;
+            }
 
             try
             {
                 BackupResult result;
-                using (await _activityLock.AcquireAsync($"fileset:{config.Name}", stoppingToken))
+                using (await _activityLock.AcquireAsync($"fileset:{config.Name}:{storageName}", stoppingToken))
                 {
-                    result = await _job.RunAsync(config, stoppingToken);
+                    result = await _job.RunAsync(config, storage, stoppingToken);
                 }
 
                 if (result.Success)
                 {
                     succeeded++;
                     _logger.LogInformation(
-                        "[{Index}/{Total}] File set backup succeeded. Name: '{Name}'",
-                        i + 1, due.Count, config.Name);
+                        "[{Index}/{Total}] File set backup succeeded. Name: '{Name}', Storage: '{Storage}'",
+                        i + 1, due.Count, config.Name, storageName);
                 }
                 else
                 {
                     failed++;
                     _logger.LogError(
-                        "[{Index}/{Total}] File set backup failed. Name: '{Name}', Error: {ErrorMessage}",
-                        i + 1, due.Count, config.Name, result.ErrorMessage);
+                        "[{Index}/{Total}] File set backup failed. Name: '{Name}', Storage: '{Storage}', Error: {ErrorMessage}",
+                        i + 1, due.Count, config.Name, storageName, result.ErrorMessage);
                 }
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning("FileSetWorker cancelled during '{Name}'", config.Name);
+                _logger.LogWarning("FileSetWorker cancelled during '{Name}' ({Storage})", config.Name, storageName);
                 return;
             }
             catch (Exception ex)
             {
                 failed++;
                 _logger.LogError(ex,
-                    "[{Index}/{Total}] Unhandled exception for file set '{Name}'. Continuing.",
-                    i + 1, due.Count, config.Name);
+                    "[{Index}/{Total}] Unhandled exception for file set '{Name}' ({Storage}). Continuing.",
+                    i + 1, due.Count, config.Name, storageName);
             }
         }
 

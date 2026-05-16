@@ -64,7 +64,19 @@ public sealed class ScheduleService : DashboardClientBase
             if (next is null)
                 continue;
 
-            result.Add(new ScheduleEntry(o.BackupMode, next.Value));
+            if (o.StorageNames is null || o.StorageNames.Count == 0)
+            {
+                result.Add(new ScheduleEntry(o.BackupMode, next.Value, null));
+                continue;
+            }
+
+            foreach (var storage in o.StorageNames)
+            {
+                if (string.IsNullOrWhiteSpace(storage))
+                    continue;
+
+                result.Add(new ScheduleEntry(o.BackupMode, next.Value, storage));
+            }
         }
 
         return result;
@@ -117,26 +129,44 @@ public sealed class ScheduleService : DashboardClientBase
         if (fetched.Overrides is not null)
         {
             foreach (var o in fetched.Overrides)
-                incoming[o.DatabaseName] = o.IsActive ? o.CronExpression : "(inactive)";
+            {
+                var value = o.IsActive ? o.CronExpression : "(inactive)";
+
+                if (o.StorageNames is null || o.StorageNames.Count == 0)
+                {
+                    var key = $"{o.DatabaseName}|{o.BackupMode}|(default)";
+                    incoming[key] = value;
+                    continue;
+                }
+
+                foreach (var storage in o.StorageNames)
+                {
+                    if (string.IsNullOrWhiteSpace(storage))
+                        continue;
+
+                    var key = $"{o.DatabaseName}|{o.BackupMode}|{storage}";
+                    incoming[key] = value;
+                }
+            }
         }
 
-        foreach (var (name, newCron) in incoming)
+        foreach (var (key, newCron) in incoming)
         {
-            var oldCron = _lastCronByName.GetValueOrDefault(name);
+            var oldCron = _lastCronByName.GetValueOrDefault(key);
             if (oldCron == newCron) continue;
 
             _logger.LogInformation(
-                "ScheduleService: cron for override '{Name}' changed. Old: '{OldCron}' → New: '{NewCron}'",
-                name, oldCron ?? "(none)", newCron);
+                "ScheduleService: cron for override '{Key}' changed. Old: '{OldCron}' → New: '{NewCron}'",
+                key, oldCron ?? "(none)", newCron);
         }
 
-        foreach (var name in _lastCronByName.Keys.ToList())
+        foreach (var key in _lastCronByName.Keys.ToList())
         {
-            if (incoming.ContainsKey(name)) continue;
+            if (incoming.ContainsKey(key)) continue;
 
             _logger.LogInformation(
-                "ScheduleService: cron for override '{Name}' removed (was '{OldCron}')",
-                name, _lastCronByName[name]);
+                "ScheduleService: cron for override '{Key}' removed (was '{OldCron}')",
+                key, _lastCronByName[key]);
         }
 
         _lastCronByName.Clear();

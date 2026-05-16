@@ -4,6 +4,7 @@ using BackupsterAgent.Domain;
 using BackupsterAgent.Enums;
 using BackupsterAgent.Services.Backup;
 using BackupsterAgent.Services.Common;
+using BackupsterAgent.Services.Common.Resolvers;
 using BackupsterAgent.Services.Common.State;
 using Microsoft.Extensions.Options;
 
@@ -13,17 +14,20 @@ public sealed class BackupTaskHandler : IAgentTaskHandler
 {
     private readonly BackupJob _backupJob;
     private readonly IBackupRunTracker _runTracker;
+    private readonly StorageResolver _storages;
     private readonly List<DatabaseConfig> _databases;
     private readonly ILogger<BackupTaskHandler> _logger;
 
     public BackupTaskHandler(
         BackupJob backupJob,
         IBackupRunTracker runTracker,
+        StorageResolver storages,
         IOptions<List<DatabaseConfig>> databases,
         ILogger<BackupTaskHandler> logger)
     {
         _backupJob = backupJob;
         _runTracker = runTracker;
+        _storages = storages;
         _databases = databases.Value;
         _logger = logger;
     }
@@ -75,14 +79,26 @@ public sealed class BackupTaskHandler : IAgentTaskHandler
 
         var mode = task.Backup.BackupMode;
 
+        if (!_storages.TryResolve(config.StorageName, out var storage))
+        {
+            _logger.LogWarning(
+                "BackupTaskHandler: backup task {TaskId} — storage '{Storage}' for database '{Database}' is not configured.",
+                task.Id, config.StorageName, databaseName);
+            return new PatchAgentTaskDto
+            {
+                Status = AgentTaskStatus.Failed,
+                ErrorMessage = $"Хранилище '{config.StorageName}' не настроено на агенте.",
+            };
+        }
+
         _logger.LogInformation(
-            "BackupTaskHandler: executing backup task {TaskId} for database '{Database}' (mode={Mode})",
-            task.Id, databaseName, mode);
+            "BackupTaskHandler: executing backup task {TaskId} for database '{Database}' (mode={Mode}, storage={Storage})",
+            task.Id, databaseName, mode, storage.Name);
 
         BackupResult result;
         try
         {
-            result = await _backupJob.RunAsync(config, mode, ct);
+            result = await _backupJob.RunAsync(config, storage, mode, ct);
         }
         catch (OperationCanceledException)
         {
@@ -99,7 +115,9 @@ public sealed class BackupTaskHandler : IAgentTaskHandler
             };
         }
 
-        _runTracker.RecordRun(databaseName, DateTime.UtcNow);
+        _runTracker.RecordRun(
+            IBackupRunTracker.DatabaseKey(databaseName, mode, config.StorageName),
+            DateTime.UtcNow);
 
         return result.Success
             ? new PatchAgentTaskDto

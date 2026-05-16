@@ -14,7 +14,6 @@ public sealed class DatabaseBackupPipeline
 {
     private readonly IBackupProviderFactory _factory;
     private readonly ConnectionResolver _connections;
-    private readonly StorageResolver _storages;
     private readonly EncryptionService _encryption;
     private readonly IUploadProviderFactory _uploadFactory;
     private readonly FileBackupService _fileBackup;
@@ -24,7 +23,6 @@ public sealed class DatabaseBackupPipeline
     public DatabaseBackupPipeline(
         IBackupProviderFactory factory,
         ConnectionResolver connections,
-        StorageResolver storages,
         EncryptionService encryption,
         IUploadProviderFactory uploadFactory,
         FileBackupService fileBackup,
@@ -33,7 +31,6 @@ public sealed class DatabaseBackupPipeline
     {
         _factory = factory;
         _connections = connections;
-        _storages = storages;
         _encryption = encryption;
         _uploadFactory = uploadFactory;
         _fileBackup = fileBackup;
@@ -44,6 +41,7 @@ public sealed class DatabaseBackupPipeline
     public async Task<PipelineOutcome> ExecuteAsync(
         BackupRunExecution exec,
         DatabaseConfig config,
+        StorageConfig storage,
         BackupMode mode,
         CancellationToken ct)
     {
@@ -52,7 +50,6 @@ public sealed class DatabaseBackupPipeline
         string? encryptedFile = null;
         string? dumpObjectKey = null;
         string? backupFolder = null;
-        StorageConfig storage;
         IUploadProvider uploader;
         long sizeBytes;
         long durationMs;
@@ -60,9 +57,8 @@ public sealed class DatabaseBackupPipeline
         try
         {
             var connection = _connections.Resolve(config.ConnectionName);
-            storage = _storages.Resolve(config.StorageName);
             var provider = _factory.GetProvider(connection.DatabaseType, mode);
-            uploader = _uploadFactory.GetProvider(config.StorageName);
+            uploader = _uploadFactory.GetProvider(storage.Name);
             backupFolder = $"{config.Database}/{startedAt:yyyy-MM-dd_HH-mm-ss}";
 
             _logger.LogInformation(

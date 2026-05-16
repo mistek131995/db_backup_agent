@@ -40,6 +40,8 @@ public sealed class RunStateStore
             return result;
         }
 
+        int legacySkipped = 0;
+
         foreach (var path in files)
         {
             if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
@@ -49,17 +51,16 @@ public sealed class RunStateStore
             {
                 var text = File.ReadAllText(path);
                 var entry = JsonSerializer.Deserialize<RunStateEntry>(text, JsonOptions);
-                if (entry is null || string.IsNullOrWhiteSpace(entry.DatabaseName))
+                if (entry is null || string.IsNullOrWhiteSpace(entry.Key))
                 {
-                    _logger.LogWarning(
-                        "RunStateStore: file '{Path}' missing databaseName — skipping", path);
+                    legacySkipped++;
                     continue;
                 }
 
-                if (result.TryGetValue(entry.DatabaseName, out var existing) && existing >= entry.LastRunUtc)
+                if (result.TryGetValue(entry.Key, out var existing) && existing >= entry.LastRunUtc)
                     continue;
 
-                result[entry.DatabaseName] = entry.LastRunUtc;
+                result[entry.Key] = entry.LastRunUtc;
             }
             catch (Exception ex) when (ex is JsonException or IOException)
             {
@@ -68,25 +69,32 @@ public sealed class RunStateStore
             }
         }
 
+        if (legacySkipped > 0)
+        {
+            _logger.LogWarning(
+                "RunStateStore: skipped {Count} legacy runs file(s) (pre-v1.4.0 format, no triple key). Duplicate-protection may miss one cron tick per affected schedule after upgrade.",
+                legacySkipped);
+        }
+
         return result;
     }
 
-    public void Write(string databaseName, DateTime lastRunUtc)
+    public void Write(string key, DateTime lastRunUtc)
     {
-        if (string.IsNullOrWhiteSpace(databaseName))
-            throw new ArgumentException("databaseName must not be empty", nameof(databaseName));
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("key must not be empty", nameof(key));
 
         lock (_writeLock)
         {
             Directory.CreateDirectory(_rootDir);
 
-            var fileName = GetFileName(databaseName);
+            var fileName = GetFileName(key);
             var finalPath = Path.Combine(_rootDir, fileName);
             var tempPath = Path.Combine(_rootDir, $"{fileName}.tmp-{Guid.NewGuid():N}");
 
             var entry = new RunStateEntry
             {
-                DatabaseName = databaseName,
+                Key = key,
                 LastRunUtc = lastRunUtc,
             };
 
@@ -103,17 +111,17 @@ public sealed class RunStateStore
             catch (IOException ex)
             {
                 _logger.LogWarning(ex,
-                    "RunStateStore: failed to persist last-run for '{Database}'. In-memory state is still updated.",
-                    databaseName);
+                    "RunStateStore: failed to persist last-run for '{Key}'. In-memory state is still updated.",
+                    key);
                 TryDelete(tempPath);
             }
         }
     }
 
-    private static string GetFileName(string databaseName)
+    private static string GetFileName(string key)
     {
-        var sanitized = Sanitize(databaseName);
-        var hash = HashSuffix(databaseName);
+        var sanitized = Sanitize(key);
+        var hash = HashSuffix(key);
         return $"{sanitized}_{hash}.json";
     }
 

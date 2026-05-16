@@ -4,6 +4,7 @@ using BackupsterAgent.Domain;
 using BackupsterAgent.Enums;
 using BackupsterAgent.Services.Backup;
 using BackupsterAgent.Services.Common;
+using BackupsterAgent.Services.Common.Resolvers;
 using BackupsterAgent.Services.Common.State;
 using Microsoft.Extensions.Options;
 
@@ -13,17 +14,20 @@ public sealed class FileSetBackupTaskHandler : IAgentTaskHandler
 {
     private readonly FileSetBackupJob _fileSetBackupJob;
     private readonly IBackupRunTracker _runTracker;
+    private readonly StorageResolver _storages;
     private readonly List<FileSetConfig> _fileSets;
     private readonly ILogger<FileSetBackupTaskHandler> _logger;
 
     public FileSetBackupTaskHandler(
         FileSetBackupJob fileSetBackupJob,
         IBackupRunTracker runTracker,
+        StorageResolver storages,
         IOptions<List<FileSetConfig>> fileSets,
         ILogger<FileSetBackupTaskHandler> logger)
     {
         _fileSetBackupJob = fileSetBackupJob;
         _runTracker = runTracker;
+        _storages = storages;
         _fileSets = fileSets.Value;
         _logger = logger;
     }
@@ -51,14 +55,26 @@ public sealed class FileSetBackupTaskHandler : IAgentTaskHandler
             };
         }
 
+        if (!_storages.TryResolve(config.StorageName, out var storage))
+        {
+            _logger.LogWarning(
+                "FileSetBackupTaskHandler: backup task {TaskId} — storage '{Storage}' for file set '{Name}' is not configured.",
+                task.Id, config.StorageName, fileSetName);
+            return new PatchAgentTaskDto
+            {
+                Status = AgentTaskStatus.Failed,
+                ErrorMessage = $"Хранилище '{config.StorageName}' не настроено на агенте.",
+            };
+        }
+
         _logger.LogInformation(
-            "FileSetBackupTaskHandler: executing file-set backup task {TaskId} for '{Name}'",
-            task.Id, fileSetName);
+            "FileSetBackupTaskHandler: executing file-set backup task {TaskId} for '{Name}' (storage={Storage})",
+            task.Id, fileSetName, storage.Name);
 
         BackupResult result;
         try
         {
-            result = await _fileSetBackupJob.RunAsync(config, ct);
+            result = await _fileSetBackupJob.RunAsync(config, storage, ct);
         }
         catch (OperationCanceledException)
         {
@@ -75,7 +91,9 @@ public sealed class FileSetBackupTaskHandler : IAgentTaskHandler
             };
         }
 
-        _runTracker.RecordRun(IBackupRunTracker.FileSetKey(fileSetName), DateTime.UtcNow);
+        _runTracker.RecordRun(
+            IBackupRunTracker.FileSetKey(fileSetName, config.StorageName),
+            DateTime.UtcNow);
 
         return result.Success
             ? new PatchAgentTaskDto

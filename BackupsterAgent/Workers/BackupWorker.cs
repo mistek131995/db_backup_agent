@@ -127,7 +127,7 @@ public sealed class BackupWorker : BackgroundService
         {
             try
             {
-                var due = new List<(DatabaseConfig Config, BackupMode Mode, DateTime NextRun)>();
+                var due = new List<(DatabaseConfig Config, BackupMode Mode, string StorageName, DateTime NextRun)>();
 
                 foreach (var config in _validDatabases)
                 {
@@ -144,18 +144,23 @@ public sealed class BackupWorker : BackgroundService
 
                     foreach (var entry in entries)
                     {
-                        var trackerKey = TrackerKey(config.Database, entry.Mode);
+                        var storageName = !string.IsNullOrWhiteSpace(entry.StorageName)
+                            ? entry.StorageName
+                            : config.StorageName;
+
+                        var trackerKey = IBackupRunTracker.DatabaseKey(
+                            config.Database, entry.Mode, storageName);
                         var last = _runTracker.GetLastRun(trackerKey);
                         if (entry.NextRun <= DateTime.UtcNow && (last is null || entry.NextRun > last))
                         {
-                            due.Add((config, entry.Mode, entry.NextRun));
+                            due.Add((config, entry.Mode, storageName, entry.NextRun));
                             _runTracker.RecordRun(trackerKey, entry.NextRun);
                         }
                         else
                         {
                             _logger.LogDebug(
-                                "BackupWorker: '{Database}' ({Mode}) next run at {NextRun:u}, nothing to do yet",
-                                config.Database, entry.Mode, entry.NextRun);
+                                "BackupWorker: '{Database}' ({Mode}, {Storage}) next run at {NextRun:u}, nothing to do yet",
+                                config.Database, entry.Mode, storageName, entry.NextRun);
                         }
                     }
                 }
@@ -186,7 +191,7 @@ public sealed class BackupWorker : BackgroundService
     }
 
     private async Task RunDueDatabasesAsync(
-        List<(DatabaseConfig Config, BackupMode Mode, DateTime NextRun)> due,
+        List<(DatabaseConfig Config, BackupMode Mode, string StorageName, DateTime NextRun)> due,
         CancellationToken stoppingToken)
     {
         _logger.LogInformation(
@@ -199,46 +204,56 @@ public sealed class BackupWorker : BackgroundService
         {
             if (stoppingToken.IsCancellationRequested) break;
 
-            var (config, mode, nextRun) = due[i];
+            var (config, mode, storageName, nextRun) = due[i];
 
             _logger.LogInformation(
-                "[{Index}/{Total}] Starting backup. Database: '{Database}', Mode: {Mode}, Connection: '{Connection}', NextRun: {NextRun:u}",
-                i + 1, due.Count, config.Database, mode, config.ConnectionName, nextRun);
+                "[{Index}/{Total}] Starting backup. Database: '{Database}', Mode: {Mode}, Storage: '{Storage}', Connection: '{Connection}', NextRun: {NextRun:u}",
+                i + 1, due.Count, config.Database, mode, storageName, config.ConnectionName, nextRun);
+
+            if (!_storages.TryResolve(storageName, out var storage))
+            {
+                failed++;
+                _logger.LogWarning(
+                    "[{Index}/{Total}] Storage '{Storage}' for database '{Database}' is not configured on this agent. Skipping. Available: {Available}",
+                    i + 1, due.Count, storageName, config.Database,
+                    _storages.Names.Count == 0 ? "(none)" : string.Join(", ", _storages.Names));
+                continue;
+            }
 
             try
             {
                 BackupResult result;
-                using (await _activityLock.AcquireAsync($"backup:{config.Database}:{mode}", stoppingToken))
+                using (await _activityLock.AcquireAsync($"backup:{config.Database}:{mode}:{storageName}", stoppingToken))
                 {
-                    result = await _job.RunAsync(config, mode, stoppingToken);
+                    result = await _job.RunAsync(config, storage, mode, stoppingToken);
                 }
 
                 if (result.Success)
                 {
                     succeeded++;
                     _logger.LogInformation(
-                        "[{Index}/{Total}] Backup succeeded. Database: '{Database}', Mode: {Mode}",
-                        i + 1, due.Count, config.Database, mode);
+                        "[{Index}/{Total}] Backup succeeded. Database: '{Database}', Mode: {Mode}, Storage: '{Storage}'",
+                        i + 1, due.Count, config.Database, mode, storageName);
                 }
                 else
                 {
                     failed++;
                     _logger.LogError(
-                        "[{Index}/{Total}] Backup failed. Database: '{Database}', Mode: {Mode}, Error: {ErrorMessage}",
-                        i + 1, due.Count, config.Database, mode, result.ErrorMessage);
+                        "[{Index}/{Total}] Backup failed. Database: '{Database}', Mode: {Mode}, Storage: '{Storage}', Error: {ErrorMessage}",
+                        i + 1, due.Count, config.Database, mode, storageName, result.ErrorMessage);
                 }
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning("BackupWorker cancelled during '{Database}' ({Mode})", config.Database, mode);
+                _logger.LogWarning("BackupWorker cancelled during '{Database}' ({Mode}, {Storage})", config.Database, mode, storageName);
                 return;
             }
             catch (Exception ex)
             {
                 failed++;
                 _logger.LogError(ex,
-                    "[{Index}/{Total}] Unhandled exception for database '{Database}' ({Mode}). Continuing.",
-                    i + 1, due.Count, config.Database, mode);
+                    "[{Index}/{Total}] Unhandled exception for database '{Database}' ({Mode}, {Storage}). Continuing.",
+                    i + 1, due.Count, config.Database, mode, storageName);
             }
         }
 
@@ -247,6 +262,4 @@ public sealed class BackupWorker : BackgroundService
             succeeded, failed, due.Count);
     }
 
-    private static string TrackerKey(string database, BackupMode mode) =>
-        $"{database}:{mode}";
 }

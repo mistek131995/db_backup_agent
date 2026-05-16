@@ -137,6 +137,8 @@ builder.Services.AddHttpClient<IFileSetSyncService, FileSetSyncService>(
     c => ConfigureDashboardClient(c, 20));
 builder.Services.AddHttpClient<IDatabaseSyncService, DatabaseSyncService>(
     c => ConfigureDashboardClient(c, 20));
+builder.Services.AddHttpClient<IStorageSyncService, StorageSyncService>(
+    c => ConfigureDashboardClient(c, 20));
 builder.Services.AddHttpClient<IAgentTaskClient, AgentTaskClient>(
     c => ConfigureDashboardClient(c, 60));
 builder.Services.AddHttpClient<IRetentionClient, RetentionClient>(
@@ -156,9 +158,7 @@ builder.Services.AddSingleton<IAgentTaskHandler, BackupTaskHandler>();
 builder.Services.AddSingleton<IAgentTaskHandler, FileSetBackupTaskHandler>();
 builder.Services.AddHostedService<BackupWorker>();
 builder.Services.AddHostedService<FileSetWorker>();
-builder.Services.AddHostedService<ConnectionSyncWorker>();
-builder.Services.AddHostedService<FileSetSyncWorker>();
-builder.Services.AddHostedService<DatabaseSyncWorker>();
+builder.Services.AddHostedService<TopologySyncWorker>();
 builder.Services.AddHostedService<RestoreTempCleanupService>();
 builder.Services.AddHostedService<AgentTaskPollingService>();
 builder.Services.AddHostedService<ChunkGcWorker>();

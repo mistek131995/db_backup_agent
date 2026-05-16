@@ -17,23 +17,23 @@ public sealed class BackupRunTracker : IBackupRunTracker
         if (initial.Count > 0)
         {
             logger.LogInformation(
-                "BackupRunTracker: restored last-run state for {Count} database(s) from disk",
+                "BackupRunTracker: restored last-run state for {Count} run(s) from disk",
                 initial.Count);
         }
     }
 
-    public void RecordRun(string databaseName, DateTime whenUtc)
+    public void RecordRun(string key, DateTime whenUtc)
     {
         lock (_writeLock)
         {
-            if (_lastRun.TryGetValue(databaseName, out var existing) && existing >= whenUtc)
+            if (_lastRun.TryGetValue(key, out var existing) && existing >= whenUtc)
                 return;
 
-            _lastRun[databaseName] = whenUtc;
-            _store.Write(databaseName, whenUtc);
+            _lastRun[key] = whenUtc;
+            _store.Write(key, whenUtc);
         }
     }
 
-    public DateTime? GetLastRun(string databaseName) =>
-        _lastRun.TryGetValue(databaseName, out var t) ? t : null;
+    public DateTime? GetLastRun(string key) =>
+        _lastRun.TryGetValue(key, out var t) ? t : null;
 }

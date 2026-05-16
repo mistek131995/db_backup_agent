@@ -9,12 +9,18 @@ namespace BackupsterAgent.Services.Backup;
 internal sealed class DatabaseBackupDescriptor : IBackupRunDescriptor
 {
     private readonly DatabaseConfig _config;
+    private readonly StorageConfig _storage;
     private readonly BackupMode _mode;
     private readonly DatabaseBackupPipeline _pipeline;
 
-    public DatabaseBackupDescriptor(DatabaseConfig config, BackupMode mode, DatabaseBackupPipeline pipeline)
+    public DatabaseBackupDescriptor(
+        DatabaseConfig config,
+        StorageConfig storage,
+        BackupMode mode,
+        DatabaseBackupPipeline pipeline)
     {
         _config = config;
+        _storage = storage;
         _mode = mode;
         _pipeline = pipeline;
     }
@@ -27,7 +33,7 @@ internal sealed class DatabaseBackupDescriptor : IBackupRunDescriptor
     [
         new("database", _config.Database),
         new("connection", _config.ConnectionName),
-        new("storage", _config.StorageName),
+        new("storage", _storage.Name),
         new("backupMode", _mode.ToString()),
     ];
 
@@ -35,13 +41,13 @@ internal sealed class DatabaseBackupDescriptor : IBackupRunDescriptor
     {
         DatabaseName = _config.Database,
         ConnectionName = _config.ConnectionName,
-        StorageName = _config.StorageName,
+        StorageName = _storage.Name,
         StartedAt = startedAt,
         BackupMode = _mode,
     };
 
     public Task<PipelineOutcome> ExecuteAsync(BackupRunExecution exec, CancellationToken ct) =>
-        _pipeline.ExecuteAsync(exec, _config, _mode, ct);
+        _pipeline.ExecuteAsync(exec, _config, _storage, _mode, ct);
 
     public OutboxEntry BuildOutboxEntry(
         string clientTaskId,
@@ -52,7 +58,7 @@ internal sealed class DatabaseBackupDescriptor : IBackupRunDescriptor
         ClientTaskId = clientTaskId,
         DatabaseName = _config.Database,
         ConnectionName = _config.ConnectionName,
-        StorageName = _config.StorageName,
+        StorageName = _storage.Name,
         StartedAt = startedAt,
         BackupAt = finalize.BackupAt,
         Status = finalize.Status == BackupStatus.Success ? "success" : "failed",

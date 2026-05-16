@@ -9,20 +9,17 @@ namespace BackupsterAgent.Services.Backup;
 
 public sealed class FileSetBackupPipeline
 {
-    private readonly StorageResolver _storages;
     private readonly IUploadProviderFactory _uploadFactory;
     private readonly FileBackupService _fileBackup;
     private readonly ManifestStore _manifestStore;
     private readonly ILogger<FileSetBackupPipeline> _logger;
 
     public FileSetBackupPipeline(
-        StorageResolver storages,
         IUploadProviderFactory uploadFactory,
         FileBackupService fileBackup,
         ManifestStore manifestStore,
         ILogger<FileSetBackupPipeline> logger)
     {
-        _storages = storages;
         _uploadFactory = uploadFactory;
         _fileBackup = fileBackup;
         _manifestStore = manifestStore;
@@ -32,10 +29,11 @@ public sealed class FileSetBackupPipeline
     public async Task<PipelineOutcome> ExecuteAsync(
         BackupRunExecution exec,
         FileSetConfig config,
+        StorageConfig storage,
         CancellationToken ct)
     {
         var startedAt = exec.StartedAt;
-        var uploader = _uploadFactory.GetProvider(config.StorageName);
+        var uploader = _uploadFactory.GetProvider(storage.Name);
         var backupFolder = $"{config.Name}/{startedAt:yyyy-MM-dd_HH-mm-ss}";
 
         _logger.LogInformation("FileSetBackupPipeline resolved. Folder: '{Folder}'", backupFolder);

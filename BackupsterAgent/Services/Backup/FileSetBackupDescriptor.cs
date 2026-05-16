@@ -9,11 +9,16 @@ namespace BackupsterAgent.Services.Backup;
 internal sealed class FileSetBackupDescriptor : IBackupRunDescriptor
 {
     private readonly FileSetConfig _config;
+    private readonly StorageConfig _storage;
     private readonly FileSetBackupPipeline _pipeline;
 
-    public FileSetBackupDescriptor(FileSetConfig config, FileSetBackupPipeline pipeline)
+    public FileSetBackupDescriptor(
+        FileSetConfig config,
+        StorageConfig storage,
+        FileSetBackupPipeline pipeline)
     {
         _config = config;
+        _storage = storage;
         _pipeline = pipeline;
     }
 
@@ -24,21 +29,21 @@ internal sealed class FileSetBackupDescriptor : IBackupRunDescriptor
     public IReadOnlyList<KeyValuePair<string, string?>> ActivityTags =>
     [
         new("fileSet", _config.Name),
-        new("storage", _config.StorageName),
+        new("storage", _storage.Name),
     ];
 
     public OpenBackupRecordDto BuildOpenDto(DateTime startedAt) => new()
     {
         DatabaseName = _config.Name,
         ConnectionName = string.Empty,
-        StorageName = _config.StorageName,
+        StorageName = _storage.Name,
         StartedAt = startedAt,
         DatabaseType = DatabaseType.FileSet,
         FileSetName = _config.Name,
     };
 
     public Task<PipelineOutcome> ExecuteAsync(BackupRunExecution exec, CancellationToken ct) =>
-        _pipeline.ExecuteAsync(exec, _config, ct);
+        _pipeline.ExecuteAsync(exec, _config, _storage, ct);
 
     public OutboxEntry BuildOutboxEntry(
         string clientTaskId,
@@ -49,7 +54,7 @@ internal sealed class FileSetBackupDescriptor : IBackupRunDescriptor
         ClientTaskId = clientTaskId,
         DatabaseName = _config.Name,
         ConnectionName = string.Empty,
-        StorageName = _config.StorageName,
+        StorageName = _storage.Name,
         StartedAt = startedAt,
         BackupAt = finalize.BackupAt,
         Status = finalize.Status == BackupStatus.Success ? "success" : "failed",

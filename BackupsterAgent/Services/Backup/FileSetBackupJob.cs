@@ -15,6 +15,9 @@ public sealed class FileSetBackupJob
         _pipeline = pipeline;
     }
 
-    public Task<BackupResult> RunAsync(FileSetConfig config, CancellationToken ct) =>
-        _coordinator.RunAsync(new FileSetBackupDescriptor(config, _pipeline), ct);
+    public Task<BackupResult> RunAsync(
+        FileSetConfig config,
+        StorageConfig storage,
+        CancellationToken ct) =>
+        _coordinator.RunAsync(new FileSetBackupDescriptor(config, storage, _pipeline), ct);
 }
